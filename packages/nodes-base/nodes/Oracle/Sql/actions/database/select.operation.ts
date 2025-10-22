@@ -121,7 +121,7 @@ export async function execute(
 		const returnAll = this.getNodeParameter('returnAll', i, false);
 		if (!returnAll) {
 			const limit = this.getNodeParameter('limit', i, 50);
-			query += ` FETCH FIRST ${limit} ROWS ONLY`;
+			query += `where ROWNUM <= ${limit}`;
 		}
 
 		const queryWithValues = { query, values };
