@@ -87,6 +87,10 @@ export async function execute(
 ): Promise<INodeExecutionData[]> {
 	const queries: QueryWithValues[] = [];
 
+	const conn = await pool.getConnection();
+	const is12cOrHigher = conn.oracleServerVersion >= 1200000000;
+	await conn.close();
+
 	for (let i = 0; i < items.length; i++) {
 		const schema = this.getNodeParameter('schema', i, undefined, {
 			extractValue: true,
@@ -109,19 +113,34 @@ export async function execute(
 			query = `SELECT ${quotedColumns} FROM ${quoteSqlIdentifier(schema)}.${quoteSqlIdentifier(table)}`;
 		}
 
+		// Add WHERE clause
 		const whereClauses =
 			((this.getNodeParameter('where', i, []) as IDataObject).values as WhereClause[]) || [];
 		const combineConditions = this.getNodeParameter('combineConditions', i, 'AND') as string;
 		[query, values] = addWhereClauses(query, whereClauses, combineConditions, columnMetaDataObject);
 
+		// Add ORDER BY if needed
 		const sortRules =
 			((this.getNodeParameter('sort', i, []) as IDataObject).values as SortRule[]) || [];
 		query = addSortRules(query, sortRules);
 
+		// Handle LIMIT / pagination
 		const returnAll = this.getNodeParameter('returnAll', i, false);
 		if (!returnAll) {
 			const limit = this.getNodeParameter('limit', i, 50);
-			query += `where ROWNUM <= ${limit}`;
+
+			if (!is12cOrHigher) {
+				// Oracle 11g (ROWNUM)
+				if (/where\s+/i.test(query)) {
+					// already has WHERE
+					query += ` AND ROWNUM <= ${limit}`;
+				} else {
+					query += ` WHERE ROWNUM <= ${limit}`;
+				}
+			} else {
+				// Oracle 12c+ (FETCH FIRST)
+				query += ` FETCH FIRST ${limit} ROWS ONLY`;
+			}
 		}
 
 		const queryWithValues = { query, values };
