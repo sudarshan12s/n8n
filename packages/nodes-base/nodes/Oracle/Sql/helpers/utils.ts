@@ -24,6 +24,7 @@ import type {
 	SortRule,
 	ColumnMap,
 	OracleDBNodeOptions,
+	TableColumnRow,
 } from './interfaces';
 
 const n8nTypetoDBType: { [key: string]: oracledb.DbType } = {
@@ -228,18 +229,6 @@ export function addSortRules(query: string, rules: SortRule[]): string {
 	});
 
 	return `${query}${orderByQuery}`;
-}
-
-interface TableColumnRow {
-	COLUMN_NAME: string;
-	DATA_TYPE: string;
-	DATA_LENGTH: number;
-	CHAR_LENGTH: number;
-	DEFAULT_LENGTH: number | null;
-	NULLABLE: 'Y' | 'N';
-	IDENTITY_COLUMN?: 'YES' | 'NO'; // only present in 12c+
-	HAS_DEFAULT: 'YES' | 'NO';
-	constraint_types?: string | null;
 }
 
 export async function getColumnMetaData(
