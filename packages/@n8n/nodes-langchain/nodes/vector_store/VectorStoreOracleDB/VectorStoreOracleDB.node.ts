@@ -1,11 +1,12 @@
-import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@langchain/oracle';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
-import type { OracleDBConfig } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
-import type { INodeProperties } from 'n8n-workflow';
-import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
+import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@langchain/oracle';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
-import { createVectorStoreNode } from '../shared/createVectorStoreNode/createVectorStoreNode';
+import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
+import type { INodeProperties } from 'n8n-workflow';
+
 import { metadataFilterField } from '@utils/sharedFields';
+
+import { createVectorStoreNode } from '../shared/createVectorStoreNode/createVectorStoreNode';
 const sharedFields: INodeProperties[] = [
 	{
 		displayName: 'Table Name',
@@ -126,15 +127,11 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		const tableName = context.getNodeParameter('tableName', itemIndex, '', {
 			extractValue: true,
 		}) as string;
-		const credentials = await context.getCredentials('oracleDBApi');
-		const { client, oracleConfig } = await configureOracleDB.call(
-			context,
-			credentials as OracleDBNodeCredentials,
-		);
+		const credentials = await context.getCredentials<OracleDBNodeCredentials>('oracleDBApi');
+		const client = await configureOracleDB.call(context, credentials);
 		const query = 'Test';
 		const config: OracleDBVSArgs = {
 			client,
-			oracleConfig,
 			tableName,
 			query,
 		};
