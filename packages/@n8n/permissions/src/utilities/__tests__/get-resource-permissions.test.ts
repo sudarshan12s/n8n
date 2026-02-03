@@ -6,6 +6,7 @@ import { getResourcePermissions } from '../get-resource-permissions.ee';
 describe('permissions', () => {
 	it('getResourcePermissions for empty scopes', () => {
 		expect(getResourcePermissions()).toEqual({
+			aiAssistant: {},
 			annotationTag: {},
 			auditLogs: {},
 			banner: {},
@@ -25,6 +26,7 @@ describe('permissions', () => {
 			saml: {},
 			provisioning: {},
 			securityAudit: {},
+			securitySettings: {},
 			sourceControl: {},
 			tag: {},
 			user: {},
@@ -43,6 +45,7 @@ describe('permissions', () => {
 			chatHubAgent: {},
 			breakingChanges: {},
 			apiKey: {},
+			credentialResolver: {},
 		});
 	});
 	it('getResourcePermissions', () => {
@@ -82,6 +85,7 @@ describe('permissions', () => {
 		];
 
 		const permissionRecord: PermissionsRecord = {
+			aiAssistant: {},
 			annotationTag: {},
 			auditLogs: {},
 			banner: {},
@@ -116,6 +120,7 @@ describe('permissions', () => {
 			mcp: {},
 			mcpApiKey: {},
 			securityAudit: {},
+			securitySettings: {},
 			sourceControl: {},
 			tag: {
 				create: true,
@@ -163,6 +168,7 @@ describe('permissions', () => {
 			apiKey: {
 				manage: true,
 			},
+			credentialResolver: {},
 		};
 
 		expect(getResourcePermissions(scopes)).toEqual(permissionRecord);

@@ -64,7 +64,7 @@ export interface FrontendSettings {
 	settingsMode?: 'public' | 'authenticated';
 	inE2ETests: boolean;
 	isDocker: boolean;
-	databaseType: 'sqlite' | 'mariadb' | 'mysqldb' | 'postgresdb';
+	databaseType: 'sqlite' | 'postgresdb';
 	endpointForm: string;
 	endpointFormTest: string;
 	endpointFormWaiting: string;
@@ -91,7 +91,6 @@ export interface FrontendSettings {
 	nodeJsVersion: string;
 	nodeEnv: string | undefined;
 	concurrency: number;
-	isNativePythonRunnerEnabled: boolean;
 	authCookie: {
 		secure: boolean;
 	};
@@ -206,6 +205,10 @@ export interface FrontendSettings {
 	aiCredits: {
 		enabled: boolean;
 		credits: number;
+		setup: boolean;
+	};
+	ai: {
+		allowSendingParameterValues: boolean;
 	};
 	pruning?: {
 		isEnabled: boolean;

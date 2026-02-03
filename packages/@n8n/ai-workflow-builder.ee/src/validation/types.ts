@@ -6,6 +6,7 @@ export type ProgrammaticViolationType = 'critical' | 'major' | 'minor';
 
 export const PROGRAMMATIC_VIOLATION_NAMES = [
 	'tool-node-has-no-parameters',
+	// this validation has been removed for now as it was throwing a lot of false positives
 	'tool-node-static-parameters',
 	'agent-static-prompt',
 	'agent-no-system-prompt',
@@ -28,6 +29,13 @@ export const PROGRAMMATIC_VIOLATION_NAMES = [
 	'workflow-similarity-edge-delete',
 	'workflow-similarity-edge-substitute',
 	'workflow-similarity-evaluation-failed',
+	'http-request-hardcoded-credentials',
+	'set-node-credential-field',
+	'webhook-response-mode-missing-respond-node',
+	'webhook-response-mode-mismatch',
+	'data-table-missing-set-node',
+	'node-missing-required-parameter',
+	'node-invalid-options-value',
 ] as const;
 
 export type ProgrammaticViolationName = (typeof PROGRAMMATIC_VIOLATION_NAMES)[number];
@@ -39,6 +47,7 @@ export interface ProgrammaticViolation {
 	type: ProgrammaticViolationType;
 	description: string;
 	pointsDeducted: number;
+	metadata?: Record<string, string>;
 }
 
 export interface SingleEvaluatorResult {
@@ -53,6 +62,9 @@ export interface ProgrammaticChecksResult {
 	agentPrompt: ProgrammaticViolation[];
 	tools: ProgrammaticViolation[];
 	fromAi: ProgrammaticViolation[];
+	credentials: ProgrammaticViolation[];
+	nodeUsage: ProgrammaticViolation[];
+	parameters: ProgrammaticViolation[];
 }
 
 export interface ProgrammaticEvaluationResult {
@@ -63,14 +75,17 @@ export interface ProgrammaticEvaluationResult {
 	agentPrompt: SingleEvaluatorResult;
 	tools: SingleEvaluatorResult;
 	fromAi: SingleEvaluatorResult;
+	credentials: SingleEvaluatorResult;
+	nodeUsage: SingleEvaluatorResult;
+	parameters: SingleEvaluatorResult;
 	similarity: SingleEvaluatorResult | null;
 }
 
 export interface ProgrammaticEvaluationInput {
 	generatedWorkflow: SimpleWorkflow;
 	userPrompt?: string;
-	referenceWorkflow?: SimpleWorkflow;
 	referenceWorkflows?: SimpleWorkflow[];
+	preset?: 'strict' | 'standard' | 'lenient';
 }
 
 export interface NodeResolvedConnectionTypesInfo {

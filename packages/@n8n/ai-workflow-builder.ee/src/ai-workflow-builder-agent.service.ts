@@ -12,6 +12,7 @@ import type { IUser, INodeTypeDescription, ITelemetryTrackProperties } from 'n8n
 import { LLMServiceError } from '@/errors';
 import { anthropicClaudeSonnet45 } from '@/llm-config';
 import { SessionManagerService } from '@/session-manager.service';
+import { ResourceLocatorCallbackFactory } from '@/types/callbacks';
 import {
 	BuilderFeatureFlags,
 	WorkflowBuilderAgent,
@@ -24,7 +25,8 @@ type OnTelemetryEvent = (event: string, properties: ITelemetryTrackProperties) =
 
 @Service()
 export class AiWorkflowBuilderService {
-	private readonly parsedNodeTypes: INodeTypeDescription[];
+	private nodeTypes: INodeTypeDescription[];
+
 	private sessionManager: SessionManagerService;
 
 	constructor(
@@ -36,9 +38,20 @@ export class AiWorkflowBuilderService {
 		private readonly n8nVersion?: string,
 		private readonly onCreditsUpdated?: OnCreditsUpdated,
 		private readonly onTelemetryEvent?: OnTelemetryEvent,
+		private readonly resourceLocatorCallbackFactory?: ResourceLocatorCallbackFactory,
 	) {
-		this.parsedNodeTypes = this.filterNodeTypes(parsedNodeTypes);
-		this.sessionManager = new SessionManagerService(this.parsedNodeTypes, logger);
+		this.nodeTypes = this.filterNodeTypes(parsedNodeTypes);
+		this.sessionManager = new SessionManagerService(this.nodeTypes, logger);
+	}
+
+	/**
+	 * Update the node types available to the AI workflow builder.
+	 * Called when community packages are installed, updated, or uninstalled.
+	 * This preserves existing sessions while making new node types available.
+	 */
+	updateNodeTypes(nodeTypes: INodeTypeDescription[]) {
+		this.nodeTypes = this.filterNodeTypes(nodeTypes);
+		this.sessionManager.updateNodeTypes(this.nodeTypes);
 	}
 
 	private static async getAnthropicClaudeModel({
@@ -61,10 +74,10 @@ export class AiWorkflowBuilderService {
 		});
 	}
 
-	private async getApiProxyAuthHeaders(user: IUser) {
+	private async getApiProxyAuthHeaders(user: IUser, userMessageId: string) {
 		assert(this.client);
 
-		const authResponse = await this.client.getBuilderApiProxyToken(user);
+		const authResponse = await this.client.getBuilderApiProxyToken(user, { userMessageId });
 		const authHeaders = {
 			// eslint-disable-next-line @typescript-eslint/naming-convention
 			Authorization: `${authResponse.tokenType} ${authResponse.accessToken}`,
@@ -73,7 +86,10 @@ export class AiWorkflowBuilderService {
 		return authHeaders;
 	}
 
-	private async setupModels(user: IUser): Promise<{
+	private async setupModels(
+		user: IUser,
+		userMessageId: string,
+	): Promise<{
 		anthropicClaude: ChatAnthropic;
 		tracingClient?: TracingClient;
 		// eslint-disable-next-line @typescript-eslint/naming-convention
@@ -82,7 +98,7 @@ export class AiWorkflowBuilderService {
 		try {
 			// If client is provided, use it for API proxy
 			if (this.client) {
-				const authHeaders = await this.getApiProxyAuthHeaders(user);
+				const authHeaders = await this.getApiProxyAuthHeaders(user, userMessageId);
 
 				// Extract baseUrl from client configuration
 				const baseUrl = this.client.getApiProxyBaseUrl();
@@ -158,30 +174,40 @@ export class AiWorkflowBuilderService {
 		});
 	}
 
-	private async getAgent(user: IUser, featureFlags?: BuilderFeatureFlags) {
-		const { anthropicClaude, tracingClient, authHeaders } = await this.setupModels(user);
+	private async getAgent(user: IUser, userMessageId: string, featureFlags?: BuilderFeatureFlags) {
+		const { anthropicClaude, tracingClient, authHeaders } = await this.setupModels(
+			user,
+			userMessageId,
+		);
+
+		// Create resource locator callback scoped to this user if factory is provided
+		const resourceLocatorCallback = this.resourceLocatorCallbackFactory?.(user.id);
 
 		const agent = new WorkflowBuilderAgent({
-			parsedNodeTypes: this.parsedNodeTypes,
-			// We use Sonnet both for simple and complex tasks
-			llmSimpleTask: anthropicClaude,
-			llmComplexTask: anthropicClaude,
+			parsedNodeTypes: this.nodeTypes,
+			// Use the same model for all stages in production
+			stageLLMs: {
+				supervisor: anthropicClaude,
+				responder: anthropicClaude,
+				discovery: anthropicClaude,
+				builder: anthropicClaude,
+				parameterUpdater: anthropicClaude,
+			},
 			logger: this.logger,
 			checkpointer: this.sessionManager.getCheckpointer(),
 			tracer: tracingClient
 				? new LangChainTracer({ client: tracingClient, projectName: 'n8n-workflow-builder' })
 				: undefined,
 			instanceUrl: this.instanceUrl,
-			onGenerationSuccess: async () => {
-				await this.onGenerationSuccess(user, authHeaders);
-			},
 			runMetadata: {
 				n8nVersion: this.n8nVersion,
 				featureFlags: featureFlags ?? {},
 			},
+			onGenerationSuccess: async () => await this.onGenerationSuccess(user, authHeaders),
+			resourceLocatorCallback,
 		});
 
-		return agent;
+		return { agent };
 	}
 
 	private async onGenerationSuccess(
@@ -208,7 +234,7 @@ export class AiWorkflowBuilderService {
 	}
 
 	async *chat(payload: ChatPayload, user: IUser, abortSignal?: AbortSignal) {
-		const agent = await this.getAgent(user, payload.featureFlags);
+		const { agent } = await this.getAgent(user, payload.id, payload.featureFlags);
 		const userId = user?.id?.toString();
 		const workflowId = payload.workflowContext?.currentWorkflow?.id;
 
@@ -216,10 +242,10 @@ export class AiWorkflowBuilderService {
 			yield output;
 		}
 
-		// After the stream completes, track telemetry
+		// Track telemetry after stream completes (onGenerationSuccess is called by the agent)
 		if (this.onTelemetryEvent && userId) {
 			try {
-				await this.trackBuilderReplyTelemetry(agent, workflowId, userId);
+				await this.trackBuilderReplyTelemetry(agent, workflowId, userId, payload.id);
 			} catch (error) {
 				this.logger?.error('Failed to track builder reply telemetry', { error });
 			}
@@ -230,6 +256,7 @@ export class AiWorkflowBuilderService {
 		agent: WorkflowBuilderAgent,
 		workflowId: string | undefined,
 		userId: string,
+		userMessageId: string,
 	): Promise<void> {
 		if (!this.onTelemetryEvent) return;
 
@@ -270,6 +297,7 @@ export class AiWorkflowBuilderService {
 			...(state.values.templateIds.length > 0 && {
 				templates_selected: state.values.templateIds,
 			}),
+			user_message_id: userMessageId,
 		};
 
 		this.onTelemetryEvent('Builder replied to user message', properties);
@@ -292,5 +320,17 @@ export class AiWorkflowBuilderService {
 			creditsQuota: -1,
 			creditsClaimed: 0,
 		};
+	}
+
+	/**
+	 * Truncate all messages including and after the message with the specified messageId
+	 * Used when restoring to a previous version
+	 */
+	async truncateMessagesAfter(
+		workflowId: string,
+		user: IUser,
+		messageId: string,
+	): Promise<boolean> {
+		return await this.sessionManager.truncateMessagesAfter(workflowId, user.id, messageId);
 	}
 }

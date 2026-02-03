@@ -42,7 +42,7 @@ export class CredentialsFinderService {
 	 */
 	async findGlobalCredentialById(
 		credentialId: string,
-		relations?: { shared: { project: { projectRelations: { user: boolean } } } },
+		relations?: { shared: { project: boolean } },
 	): Promise<CredentialsEntity | null> {
 		return await this.credentialsRepository.findOne({
 			where: {
@@ -51,6 +51,10 @@ export class CredentialsFinderService {
 			},
 			relations,
 		});
+	}
+
+	async findCredentialById(credentialId: string): Promise<CredentialsEntity | null> {
+		return await this.credentialsRepository.findOne({ where: { id: credentialId } });
 	}
 
 	/**
@@ -144,7 +148,7 @@ export class CredentialsFinderService {
 			// TODO: write a small relations merger and use that one here
 			relations: {
 				credentials: {
-					shared: { project: { projectRelations: { user: true } } },
+					shared: { project: true },
 				},
 			},
 		});
@@ -156,7 +160,7 @@ export class CredentialsFinderService {
 		// Check for global credentials with read-only access
 		if (this.hasGlobalReadOnlyAccess(scopes)) {
 			return await this.findGlobalCredentialById(credentialsId, {
-				shared: { project: { projectRelations: { user: true } } },
+				shared: { project: true },
 			});
 		}
 
