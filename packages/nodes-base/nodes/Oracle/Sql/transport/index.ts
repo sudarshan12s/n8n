@@ -12,6 +12,7 @@ import type { OracleDBNodeOptions, OracleDBNodeCredentials } from '../helpers/in
 
 // used for thick mode to call initOracleClient API only once.
 let initializeDriverMode = false;
+const failedPools: Set<oracledb.Pool> = new Set();
 
 const getOracleDBConfig = (credentials: OracleDBNodeCredentials) => {
 	const { useThickMode, useSSL, ...dbConfig } = {
@@ -21,6 +22,37 @@ const getOracleDBConfig = (credentials: OracleDBNodeCredentials) => {
 
 	return dbConfig;
 };
+
+async function retryCleanup(pool: oracledb.Pool): Promise<void> {
+	try {
+		await pool.close();
+		failedPools.delete(pool);
+		//this.logger.debug('Pool closed successfully after retry.', { pool });
+	} catch (error) {
+		// Log the error and re-add the pool to the failedPools set
+		//this.logger.error('Error closing pool, retrying cleanup', { error, retries, pool });
+
+		// Re-add the pool to the failed pools set and schedule the next retry
+		if (error.code === 'NJS-104') {
+			failedPools.add(pool);
+		} else {
+			failedPools.delete(pool);
+		}
+		// Retry after exponential backoff
+		//setTimeout(() => retryCleanup(pool, retries + 1), retryDelay);
+	}
+}
+
+async function retryFailedPools(): Promise<void> {
+	if (failedPools.size > 0) {
+		for (const failedPool of failedPools) {
+			await retryCleanup(failedPool);
+		}
+
+		//clear the set (or keep them if max retries aren't reached)
+		//failedPools.clear();
+	}
+}
 
 export async function configureOracleDB(
 	this: IExecuteFunctions | ICredentialTestFunctions | ILoadOptionsFunctions | ITriggerFunctions,
@@ -44,9 +76,15 @@ export async function configureOracleDB(
 
 		abortController.signal.addEventListener('abort', async () => {
 			try {
+				if (failedPools.size > 0) {
+					await retryFailedPools(); // Start with 0 retries
+				}
 				await pool.close();
 				this.logger.debug('pool closed on abort');
 			} catch (error) {
+				if (error.code === 'NJS-104') {
+					failedPools.add(pool); // Keep track of this pool for retry
+				}
 				this.logger.error('Error closing pool on abort', { error });
 			}
 		});
