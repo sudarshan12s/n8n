@@ -1,4 +1,4 @@
-import { OracleEmbeddings } from '@langchain/oracle';
+import { OracleEmbeddings } from '@oracle/langchain-oracledb';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
 import type {
@@ -92,7 +92,9 @@ export class EmbeddingsOracleDb implements INodeType {
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		this.logger.debug('Supply data for embeddings Oracle');
-		const modelName = this.getNodeParameter('model', itemIndex) as string;
+		const modelParam = this.getNodeParameter('model', itemIndex) as string | { value: string };
+		const modelName = typeof modelParam === 'string' ? modelParam : modelParam.value;
+
 		const credentials = await this.getCredentials('oracleDBApi');
 		const pool = await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
 
@@ -100,7 +102,7 @@ export class EmbeddingsOracleDb implements INodeType {
 		try {
 			const pref = {
 				provider: 'database',
-				model: modelName.value,
+				model: modelName,
 			};
 			const embeddings = new OracleEmbeddings(connection, pref);
 			//const docEmbeddings = await embeddings.embedDocuments(texts);

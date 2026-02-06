@@ -15,10 +15,13 @@ export async function searchModels(
 		'select model_name, algorithm, mining_function from user_mining_models',
 	);
 	const models = result.rows;
+
 	return {
-		results: models.map((model: any) => ({
-			name: model[0],
-			value: model[0],
-		})),
+		results: models
+			? models.map((model: any) => ({
+					name: model[0],
+					value: model[0],
+				}))
+			: [],
 	};
 }

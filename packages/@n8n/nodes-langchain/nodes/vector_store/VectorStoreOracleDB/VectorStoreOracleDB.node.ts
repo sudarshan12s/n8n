@@ -1,5 +1,5 @@
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
-import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@langchain/oracle';
+import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@oracle/langchain-oracledb';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { INodeProperties } from 'n8n-workflow';

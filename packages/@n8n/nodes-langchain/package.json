@@ -205,7 +205,7 @@
     "@langchain/mongodb": "1.0.1",
     "@langchain/ollama": "1.0.2",
     "@langchain/openai": "catalog:",
-    "@langchain/oracle": "file:/Users/sudarshansoma/Downloads/langchain-oracle-0.3.1.tgz",
+    "@oracle/langchain-oracledb": "file:/Users/sudarshansoma/Downloads/oracle-langchain-oracledb-0.1.0.tgz",
     "@langchain/pinecone": "1.0.1",
     "@langchain/qdrant": "1.0.1",
     "@langchain/redis": "1.0.1",
