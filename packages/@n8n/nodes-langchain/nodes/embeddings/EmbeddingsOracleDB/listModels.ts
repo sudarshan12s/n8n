@@ -11,17 +11,22 @@ export async function searchModels(
 	const pool = await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
 
 	const connection = await pool.getConnection();
-	const result = await connection.execute(
-		'select model_name, algorithm, mining_function from user_mining_models',
-	);
-	const models = result.rows;
 
-	return {
-		results: models
-			? models.map((model: any) => ({
-					name: model[0],
-					value: model[0],
-				}))
-			: [],
-	};
+	try {
+		const result = await connection.execute(
+			'select model_name, algorithm, mining_function from user_mining_models',
+		);
+		const models = result.rows;
+
+		return {
+			results: models
+				? models.map((model: any) => ({
+						name: model[0],
+						value: model[0],
+					}))
+				: [],
+		};
+	} finally {
+		await connection.close();
+	}
 }

@@ -1,12 +1,11 @@
-import type { EmbeddingsInterface } from '@langchain/core/embeddings';
+import type { Embeddings } from '@langchain/core/embeddings';
+import type { Document } from '@langchain/core/documents';
 import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@oracle/langchain-oracledb';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
-import type { INodeProperties } from 'n8n-workflow';
+import type { IExecuteFunctions, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
 
-import { metadataFilterField } from '@utils/sharedFields';
-
-import { createVectorStoreNode } from '../shared/createVectorStoreNode/createVectorStoreNode';
+import { createVectorStoreNode, metadataFilterField } from '@n8n/ai-utilities';
 const sharedFields: INodeProperties[] = [
 	{
 		displayName: 'Table Name',
@@ -61,7 +60,7 @@ const retrieveFields: INodeProperties[] = [
 
 class ExtendedOracleDBVectorStore extends OracleVS {
 	static async initialize(
-		embeddings: EmbeddingsInterface,
+		embeddings: Embeddings,
 		args: OracleDBVSArgs,
 	): Promise<ExtendedOracleDBVectorStore> {
 		const oracleDBVectorStore = new this(embeddings, args);
@@ -100,7 +99,12 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 	sharedFields,
 	loadFields: retrieveFields,
 	retrieveFields,
-	async getVectorStoreClient(context, filter, embeddings, itemIndex) {
+	async getVectorStoreClient(
+		context: IExecuteFunctions | ISupplyDataFunctions,
+		filter: Record<string, never> | undefined,
+		embeddings: Embeddings,
+		itemIndex: number,
+	): Promise<ExtendedOracleDBVectorStore> {
 		const tableName = context.getNodeParameter('tableName', itemIndex, '', {
 			extractValue: true,
 		}) as string;
@@ -111,7 +115,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			client,
 			tableName,
 			query,
-			filter,
+			filter: filter as ExtendedOracleDBVectorStore['FilterType'] | undefined,
 		};
 
 		config.distanceStrategy = context.getNodeParameter(
@@ -123,12 +127,17 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		return await ExtendedOracleDBVectorStore.initialize(embeddings, config);
 	},
 
-	async populateVectorStore(context, embeddings, documents, itemIndex) {
+	async populateVectorStore(
+		context: IExecuteFunctions | ISupplyDataFunctions,
+		embeddings: Embeddings,
+		documents: Array<Document<Record<string, unknown>>>,
+		itemIndex: number,
+	): Promise<void> {
 		const tableName = context.getNodeParameter('tableName', itemIndex, '', {
 			extractValue: true,
 		}) as string;
-		const credentials = await context.getCredentials<OracleDBNodeCredentials>('oracleDBApi');
-		const client = await configureOracleDB.call(context, credentials);
+		const credentials = await context.getCredentials('oracleDBApi');
+		const client = await configureOracleDB.call(context, credentials as OracleDBNodeCredentials);
 		const query = 'Test';
 		const config: OracleDBVSArgs = {
 			client,

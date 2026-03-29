@@ -1,4 +1,6 @@
+import { Embeddings } from '@langchain/core/embeddings';
 import { OracleEmbeddings } from '@oracle/langchain-oracledb';
+import type oracledb from 'oracledb';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
 import type {
@@ -10,8 +12,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 
-import { logWrapper } from '@utils/logWrapper';
-import { getConnectionHintNoticeField } from '@utils/sharedFields';
+import { getConnectionHintNoticeField, logWrapper } from '@n8n/ai-utilities';
 
 import { searchModels } from './listModels';
 
@@ -43,6 +44,36 @@ export const generationFields: INodeProperties[] = [
 		description: 'The model. Choose from the list, or specify an ID.',
 	},
 ];
+
+class PooledOracleEmbeddings extends Embeddings {
+	constructor(
+		private readonly pool: oracledb.Pool,
+		private readonly pref: Record<string, unknown>,
+		private readonly proxy?: string,
+	) {
+		super({});
+	}
+
+	private async withConnection<T>(
+		callback: (embeddings: OracleEmbeddings) => Promise<T>,
+	): Promise<T> {
+		const connection = await this.pool.getConnection();
+		try {
+			const embeddings = new OracleEmbeddings(connection, this.pref, this.proxy);
+			return await callback(embeddings);
+		} finally {
+			await connection.close();
+		}
+	}
+
+	async embedDocuments(documents: string[]): Promise<number[][]> {
+		return await this.withConnection((embeddings) => embeddings.embedDocuments(documents));
+	}
+
+	async embedQuery(document: string): Promise<number[]> {
+		return await this.withConnection((embeddings) => embeddings.embedQuery(document));
+	}
+}
 
 export class EmbeddingsOracleDb implements INodeType {
 	methods = {
@@ -98,22 +129,14 @@ export class EmbeddingsOracleDb implements INodeType {
 		const credentials = await this.getCredentials('oracleDBApi');
 		const pool = await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
 
-		const connection = await pool.getConnection();
-		try {
-			const pref = {
-				provider: 'database',
-				model: modelName,
-			};
-			const embeddings = new OracleEmbeddings(connection, pref);
-			//const docEmbeddings = await embeddings.embedDocuments(texts);
-			//await connection.close();
+		const pref = {
+			provider: 'database',
+			model: modelName,
+		};
+		const embeddings = new PooledOracleEmbeddings(pool, pref);
 
-			return {
-				response: logWrapper(embeddings, this),
-			};
-		} finally {
-			//await connection?.close();
-		}
-		// Fix it
+		return {
+			response: logWrapper(embeddings, this),
+		};
 	}
 }
