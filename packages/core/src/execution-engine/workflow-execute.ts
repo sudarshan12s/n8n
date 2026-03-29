@@ -140,13 +140,17 @@ export class WorkflowExecute {
 		// If a destination node is given we only run the direct parent nodes and no others
 		let runNodeFilter: string[] | undefined;
 		if (destinationNode) {
-			runNodeFilter = workflow.getParentNodes(destinationNode.nodeName);
+			runNodeFilter = [
+				...workflow.getParentNodes(destinationNode.nodeName),
+				...workflow.getParentNodes(destinationNode.nodeName, 'ALL_NON_MAIN'),
+			];
 			if (destinationNode.mode === 'inclusive') {
 				runNodeFilter.push(destinationNode.nodeName);
 			}
 			if (additionalRunFilterNodes) {
 				runNodeFilter.push.apply(runNodeFilter, additionalRunFilterNodes);
 			}
+			runNodeFilter = Array.from(new Set(runNodeFilter));
 		}
 
 		// Initialize the data of the start nodes
@@ -177,6 +181,7 @@ export class WorkflowExecute {
 			resultData: {
 				pinData,
 			},
+			resumeToken: this.runExecutionData.resumeToken,
 		});
 
 		return this.processRunExecutionData(workflow);
@@ -291,6 +296,7 @@ export class WorkflowExecute {
 				waitingExecution,
 				waitingExecutionSource,
 			},
+			resumeToken: this.runExecutionData.resumeToken,
 		});
 
 		// Still passing the original workflow here, because the WorkflowDataProxy
@@ -1247,6 +1253,12 @@ export class WorkflowExecute {
 			);
 		}
 
+		if (nodeType.supplyData) {
+			throw new ApplicationError(
+				`The node "${node.type}" has a "supplyData" method but no "execute" method.`,
+			);
+		}
+
 		const isDeclarativeNode = nodeType.description.requestDefaults !== undefined;
 		if (nodeType.webhook && !isDeclarativeNode) {
 			// Check if the node have requestDefaults(Declarative Node),
@@ -1438,6 +1450,8 @@ export class WorkflowExecute {
 
 					if (!this.additionalData.restartExecutionId) {
 						await hooks.runHook('workflowExecuteBefore', [workflow, this.runExecutionData]);
+					} else {
+						await hooks.runHook('workflowExecuteResume', [workflow, this.runExecutionData]);
 					}
 				} catch (error) {
 					const e = error as unknown as ExecutionBaseError;
@@ -1496,6 +1510,9 @@ export class WorkflowExecute {
 					executionData =
 						this.runExecutionData.executionData!.nodeExecutionStack.shift() as IExecuteData;
 					executionNode = executionData.node;
+
+					// Reset per-node dynamic credential flag before each node execution
+					this.additionalData.currentNodeUsedDynamicCredentials = false;
 
 					const taskStartedData: ITaskStartedData = {
 						startTime: Date.now(),
@@ -1813,6 +1830,8 @@ export class WorkflowExecute {
 						executionTime: Date.now() - taskStartedData.startTime,
 						metadata: executionData.metadata,
 						executionStatus: this.runExecutionData.waitTill ? 'waiting' : 'success',
+						usedDynamicCredentials:
+							this.additionalData.currentNodeUsedDynamicCredentials || undefined,
 					};
 
 					if (executionError !== undefined) {
@@ -2588,6 +2607,13 @@ export class WorkflowExecute {
 				executionData.data.main.length === 1 &&
 				executionData.data.main[0]?.length === nodeSuccessData[0].length;
 
+			// Multiple inputs → single output (e.g., aggregating items into one)
+			const isSingleOutput =
+				nodeSuccessData.length === 1 &&
+				nodeSuccessData[0]?.length === 1 &&
+				executionData.data.main.length === 1 &&
+				(executionData.data.main[0]?.length ?? 0) > 1;
+
 			checkOutputData: for (const outputData of nodeSuccessData) {
 				if (outputData === null) {
 					continue;
@@ -2607,6 +2633,11 @@ export class WorkflowExecute {
 							// is the origin of the corresponding output items
 							item.pairedItem = {
 								item: index,
+							};
+						} else if (isSingleOutput) {
+							// Multiple inputs were aggregated into a single output, pair to first input
+							item.pairedItem = {
+								item: 0,
 							};
 						} else {
 							// In all other cases autofixing is not possible

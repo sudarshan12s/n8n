@@ -1,18 +1,21 @@
 import { ref } from 'vue';
-import type { SecretProviderConnection } from '@n8n/api-types';
+import type {
+	SecretProviderConnection,
+	ReloadSecretProviderConnectionResponse,
+} from '@n8n/api-types';
 import { useRootStore } from '@n8n/stores/useRootStore';
 import {
 	getSecretProviderConnectionByKey,
 	createSecretProviderConnection,
 	updateSecretProviderConnection,
 	testSecretProviderConnection,
+	reloadSecretProviderConnection,
+	getProjectSecretProviderConnectionByKey,
+	createProjectSecretProviderConnection,
+	updateProjectSecretProviderConnection,
+	testProjectSecretProviderConnection,
+	enableSecretProviderConnection,
 } from '@n8n/rest-api-client';
-import {
-	mockGetSecretProviderConnectionByKey,
-	mockCreateSecretProviderConnection,
-	mockUpdateSecretProviderConnection,
-	mockTestSecretProviderConnection,
-} from './useSecretsProviders.mock';
 
 /**
  * Low-level composable for secrets provider connection API operations.
@@ -20,31 +23,32 @@ import {
  * UI feedback (toasts, errors) should be handled by the caller.
  */
 
-export function useSecretsProviderConnection(options?: { useMockApi?: boolean }) {
-	const USE_MOCK_API = options?.useMockApi ?? true;
+export function useSecretsProviderConnection(projectId?: string) {
 	const rootStore = useRootStore();
 
 	const connectionState = ref<SecretProviderConnection['state']>('initializing');
+	const connectionError = ref<string | undefined>(undefined);
 	const isLoading = ref(false);
 	const isTesting = ref(false);
 
+	function setConnectionState(state: SecretProviderConnection['state']) {
+		connectionState.value = state;
+	}
+
 	// API operations
-	async function testConnection(connectionId: string): Promise<SecretProviderConnection['state']> {
-		// POST /rest/secret-providers/connections/:connectionId/test
+	async function testConnection(providerKey: string): Promise<SecretProviderConnection['state']> {
 		isTesting.value = true;
 		try {
-			if (USE_MOCK_API) {
-				const { testState } = await mockTestSecretProviderConnection();
-				connectionState.value = testState;
-				return testState;
-			}
-
-			const { testState } = await testSecretProviderConnection(
-				rootStore.restApiContext,
-				connectionId,
-			);
+			const { testState, error } = projectId
+				? await testProjectSecretProviderConnection(
+						rootStore.restApiContext,
+						projectId,
+						providerKey,
+					)
+				: await testSecretProviderConnection(rootStore.restApiContext, providerKey);
 
 			connectionState.value = testState === 'tested' ? 'connected' : testState;
+			connectionError.value = error;
 
 			return connectionState.value;
 		} catch {
@@ -56,14 +60,16 @@ export function useSecretsProviderConnection(options?: { useMockApi?: boolean })
 	}
 
 	async function getConnection(providerKey: string): Promise<SecretProviderConnection> {
-		// GET /rest/secret-providers/connections/:providerKey
 		isLoading.value = true;
 		try {
-			const connection = USE_MOCK_API
-				? await mockGetSecretProviderConnectionByKey(providerKey)
+			const connection = projectId
+				? await getProjectSecretProviderConnectionByKey(
+						rootStore.restApiContext,
+						projectId,
+						providerKey,
+					)
 				: await getSecretProviderConnectionByKey(rootStore.restApiContext, providerKey);
 
-			await testConnection(connection.id);
 			return connection;
 		} finally {
 			isLoading.value = false;
@@ -76,11 +82,12 @@ export function useSecretsProviderConnection(options?: { useMockApi?: boolean })
 		settings: Record<string, unknown>;
 		projectIds: string[];
 	}): Promise<SecretProviderConnection> {
-		// PUT /rest/secret-providers/connections/:providerKey
-		const connection = USE_MOCK_API
-			? await mockCreateSecretProviderConnection({
-					...connectionData,
-					isGlobal: true,
+		const connection = projectId
+			? await createProjectSecretProviderConnection(rootStore.restApiContext, projectId, {
+					providerKey: connectionData.providerKey,
+					type: connectionData.type,
+					projectIds: [projectId],
+					settings: connectionData.settings,
 				})
 			: await createSecretProviderConnection(rootStore.restApiContext, {
 					...connectionData,
@@ -98,24 +105,42 @@ export function useSecretsProviderConnection(options?: { useMockApi?: boolean })
 			settings: Record<string, unknown>;
 		},
 	): Promise<SecretProviderConnection> {
-		// PATCH /rest/secret-providers/connections/:providerKey
-		const connection = USE_MOCK_API
-			? await mockUpdateSecretProviderConnection(providerKey, connectionData)
+		const connection = projectId
+			? await updateProjectSecretProviderConnection(
+					rootStore.restApiContext,
+					projectId,
+					providerKey,
+					{ settings: connectionData.settings },
+				)
 			: await updateSecretProviderConnection(rootStore.restApiContext, providerKey, connectionData);
 
 		return connection;
 	}
 
+	async function reloadConnection(
+		providerKey: string,
+	): Promise<ReloadSecretProviderConnectionResponse> {
+		return await reloadSecretProviderConnection(rootStore.restApiContext, providerKey);
+	}
+
+	async function activateConnection(providerKey: string): Promise<SecretProviderConnection> {
+		return await enableSecretProviderConnection(rootStore.restApiContext, providerKey);
+	}
+
 	return {
 		// State
 		connectionState,
+		connectionError,
 		isLoading,
 		isTesting,
 
 		// Methods
+		setConnectionState,
 		getConnection,
 		createConnection,
 		updateConnection,
 		testConnection,
+		reloadConnection,
+		activateConnection,
 	};
 }

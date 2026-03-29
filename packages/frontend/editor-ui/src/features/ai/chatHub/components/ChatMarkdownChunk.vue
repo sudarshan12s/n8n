@@ -2,13 +2,29 @@
 import VueMarkdown from 'vue-markdown-render';
 import { useChatHubMarkdownOptions } from '@/features/ai/chatHub/composables/useChatHubMarkdownOptions';
 import { ref, useCssModule } from 'vue';
+import type { ChatMessageContentChunk } from '@n8n/api-types';
+import ChatButtons from './ChatButtons.vue';
 
-const { source } = defineProps<{
-	source: string;
+const {
+	source,
+	singlePre = false,
+	isButtonsDisabled = false,
+	footnoteStyle = 'pill',
+} = defineProps<{
+	source: ChatMessageContentChunk;
+	singlePre?: boolean;
+	isButtonsDisabled?: boolean;
+	footnoteStyle?: 'pill' | 'normal';
 }>();
 
+const emit = defineEmits<{ openArtifact: [title: string] }>();
+
 const styles = useCssModule();
-const markdown = useChatHubMarkdownOptions(styles.codeBlockActions, styles.tableContainer);
+const markdown = useChatHubMarkdownOptions(
+	styles.codeBlockActions,
+	styles.tableContainer,
+	footnoteStyle === 'pill' ? styles.footnoteRef : null,
+);
 const hoveredCodeBlockActions = ref<HTMLElement | null>(null);
 
 function getHoveredCodeBlockContent() {
@@ -37,17 +53,54 @@ defineExpose({
 
 <template>
 	<VueMarkdown
+		v-if="source.type === 'text'"
 		:key="markdown.forceReRenderKey.value"
-		:source="source"
-		:class="$style.chatMessageMarkdown"
+		:source="source.content"
+		:class="[$style.chatMessageMarkdown, { [$style.singlePre]: singlePre }]"
 		:options="markdown.options"
 		:plugins="markdown.plugins.value"
 		@mousemove="handleMouseMove"
 		@mouseleave="handleMouseLeave"
 	/>
+	<div v-else-if="source.type === 'with-buttons'" :class="$style.container">
+		<VueMarkdown
+			:key="markdown.forceReRenderKey.value"
+			:source="source.content"
+			:class="$style.chatMessageMarkdown"
+			:options="markdown.options"
+			:plugins="markdown.plugins.value"
+			@mousemove="handleMouseMove"
+			@mouseleave="handleMouseLeave"
+		/>
+		<ChatButtons :buttons="source.buttons" :is-disabled="isButtonsDisabled" />
+	</div>
+	<div v-else-if="source.type === 'hidden'" />
+	<button
+		v-else-if="source.type === 'artifact-edit' && !source.isIncomplete"
+		:class="$style.command"
+		@click="emit('openArtifact', source.command.title)"
+	>
+		Updated <b>{{ source.command.title }}</b>
+	</button>
+	<button
+		v-else-if="source.type === 'artifact-create' && !source.isIncomplete"
+		:class="$style.command"
+		@click="emit('openArtifact', source.command.title)"
+	>
+		Created <b>{{ source.command.title }}</b>
+	</button>
 </template>
 
 <style lang="scss" module>
+.container {
+	display: flex;
+	flex-direction: column;
+
+	> *:first-child > *:first-child {
+		margin-top: 0;
+	}
+}
+
 .chatMessageMarkdown {
 	--markdown--spacing: var(--spacing--2xs);
 
@@ -113,7 +166,6 @@ defineExpose({
 	// Headings inside list items should have no top margin
 	li > :is(h1, h2, h3, h4, h5, h6, p, strong):first-child {
 		margin-top: 0;
-		display: inline-block;
 	}
 
 	// Strong/bold text
@@ -211,6 +263,12 @@ defineExpose({
 		}
 	}
 
+	&.singlePre pre {
+		background: transparent;
+		margin: 0;
+		border-radius: 0;
+	}
+
 	// Blockquotes
 	blockquote {
 		font-style: italic;
@@ -241,9 +299,9 @@ defineExpose({
 
 	// Ordered lists
 	ol {
-		padding-left: calc(var(--markdown--spacing) * 2);
+		padding-left: calc(var(--markdown--spacing) * 4);
 		list-style-type: decimal;
-		list-style-position: inside;
+		list-style-position: outside;
 		margin: calc(var(--markdown--spacing) * 2) 0;
 
 		li + li {
@@ -258,9 +316,9 @@ defineExpose({
 
 	// Unordered lists
 	ul {
-		padding-left: calc(var(--markdown--spacing) * 2);
+		padding-left: calc(var(--markdown--spacing) * 4);
 		list-style-type: disc;
-		list-style-position: inside;
+		list-style-position: outside;
 		margin: calc(var(--markdown--spacing) * 2) 0;
 
 		li + li {
@@ -280,6 +338,21 @@ defineExpose({
 		margin-top: var(--markdown--spacing);
 		margin-bottom: 0;
 		padding-left: calc(var(--markdown--spacing) * 3);
+	}
+
+	// Footnote pill
+	.footnoteRef {
+		display: inline-block;
+		font-size: var(--font-size--3xs);
+		line-height: 1;
+		color: var(--color--text);
+		background: var(--color--foreground--tint-1);
+		border-radius: var(--radius--xl);
+		padding: var(--spacing--4xs) var(--spacing--2xs);
+		margin-inline: var(--spacing--5xs);
+		vertical-align: middle;
+		white-space: nowrap;
+		font-weight: var(--font-weight--regular);
 	}
 
 	// Tables
@@ -389,5 +462,18 @@ defineExpose({
 		font-style: italic;
 		color: var(--color--text--tint-1);
 	}
+}
+
+.command {
+	border: var(--border);
+	border-radius: var(--radius--lg);
+	padding: var(--spacing--sm);
+	margin-bottom: var(--spacing--sm);
+	background-color: transparent;
+	display: block;
+	width: 100%;
+	text-align: left;
+	font-weight: var(--font-weight--regular);
+	cursor: pointer;
 }
 </style>

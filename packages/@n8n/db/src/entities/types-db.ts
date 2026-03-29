@@ -100,6 +100,7 @@ export interface IExecutionResponse extends IExecutionBase {
 	retryOf?: string;
 	retrySuccessId?: string;
 	workflowData: IWorkflowBase | WorkflowWithSharingsAndCredentials;
+	workflowVersionId?: string | null;
 	customData: Record<string, string>;
 	annotation: {
 		tags: ITagBase[];
@@ -198,6 +199,7 @@ export namespace ExecutionSummaries {
 		annotationTags: string[]; // tag IDs
 		vote: AnnotationVote;
 		projectId: string;
+		workflowVersionId: string;
 	}>;
 
 	export type StopExecutionFilterQuery = { workflowId: string } & Pick<
@@ -425,8 +427,3 @@ export interface ISimplifiedPinData {
 		pairedItem?: IPairedItemData | IPairedItemData[] | number;
 	}>;
 }
-
-export type WorkflowHistoryUpdate = Omit<
-	Partial<WorkflowHistory>,
-	'versionId' | 'workflowId' | 'createdAt' | 'updatedAt'
->;

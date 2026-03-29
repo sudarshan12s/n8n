@@ -1,10 +1,10 @@
 import { LicenseState } from '@n8n/backend-common';
-import { mockLogger, mockInstance } from '@n8n/backend-test-utils';
+import { mockInstance, mockLogger } from '@n8n/backend-test-utils';
+import { SecretsProviderConnectionRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
 import { mock } from 'jest-mock-extended';
-import type { IDataObject } from 'n8n-workflow';
-
-import { CREDENTIAL_BLANKING_VALUE } from '@/constants';
+import { Cipher } from 'n8n-core';
+import { CREDENTIAL_BLANKING_VALUE, type IDataObject } from 'n8n-workflow';
 import type { EventService } from '@/events/event.service';
 import { ExternalSecretsManager } from '@/modules/external-secrets.ee/external-secrets-manager.ee';
 import { ExternalSecretsProviders } from '@/modules/external-secrets.ee/external-secrets-providers.ee';
@@ -28,8 +28,6 @@ import {
 import { createOwner, createUser } from '../shared/db/users';
 import type { SuperAgentTest } from '../shared/types';
 import { setupTestServer } from '../shared/utils';
-import { Cipher } from 'n8n-core';
-import { SecretsProviderConnectionRepository } from '@n8n/db';
 
 let authOwnerAgent: SuperAgentTest;
 let authMemberAgent: SuperAgentTest;
@@ -136,6 +134,8 @@ beforeAll(async () => {
 
 	// Get all service dependencies from Container
 	const config = Container.get(ExternalSecretsConfig);
+	config.externalSecretsForProjects = false;
+	config.externalSecretsMultipleConnections = false;
 	const settingsStore = Container.get(ExternalSecretsSettingsStore);
 	const providerRegistry = Container.get(ExternalSecretsProviderRegistry);
 	const providerLifecycle = Container.get(ExternalSecretsProviderLifecycle);
