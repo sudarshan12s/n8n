@@ -82,7 +82,7 @@ class ExtendedOracleDBVectorStore extends OracleVS {
 export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBVectorStore>({
 	meta: {
 		description: 'Work with your data in OracleDB vector support',
-		icon: 'file:oracle.svg',
+		icon: 'file:../../../../../nodes-base/nodes/Oracle/Sql/oracle.svg',
 		displayName: 'Oracle Database Vector Store',
 		docsUrl:
 			'https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.vectorstoreoracledb/',
