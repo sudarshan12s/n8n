@@ -160,12 +160,17 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		) as DistanceStrategy;
 
 		const vectorStore = await ExtendedOracleDBVectorStore.initialize(embeddings, config);
-		const originalAddDocuments = vectorStore.addDocuments.bind(vectorStore);
-		vectorStore.addDocuments = async (
-			documents,
-			options,
-		): Promise<Awaited<ReturnType<typeof originalAddDocuments>>> =>
-			await originalAddDocuments(documents, { mutateOnDuplicate: true, ...options });
+		const mode = context.getNodeParameter('mode', itemIndex, 'retrieve', {
+			extractValue: true,
+		}) as string;
+		if (mode === 'update') {
+			const originalAddDocuments = vectorStore.addDocuments.bind(vectorStore);
+			vectorStore.addDocuments = async (
+				documents,
+				options,
+			): Promise<Awaited<ReturnType<typeof originalAddDocuments>>> =>
+				await originalAddDocuments(documents, { mutateOnDuplicate: true, ...options });
+		}
 
 		return vectorStore;
 	},
