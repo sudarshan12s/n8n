@@ -1,18 +1,18 @@
+// cspell:ignore langchain oracledb ONNX MINILM
 import { Embeddings } from '@langchain/core/embeddings';
+import { getConnectionHintNoticeField, logWrapper } from '@n8n/ai-utilities';
 import { OracleEmbeddings } from '@oracle/langchain-oracledb';
-import type oracledb from 'oracledb';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
-import type {
-	INodeProperties,
-	INodeType,
-	INodeTypeDescription,
-	ISupplyDataFunctions,
-	SupplyData,
+import {
+	NodeConnectionTypes,
+	type INodeProperties,
+	type INodeType,
+	type INodeTypeDescription,
+	type ISupplyDataFunctions,
+	type SupplyData,
 } from 'n8n-workflow';
-import { NodeConnectionTypes } from 'n8n-workflow';
-
-import { getConnectionHintNoticeField, logWrapper } from '@n8n/ai-utilities';
+import type oracledb from 'oracledb';
 
 import { searchModels } from './listModels';
 
@@ -55,23 +55,29 @@ class PooledOracleEmbeddings extends Embeddings {
 	}
 
 	private async withConnection<T>(
-		callback: (embeddings: OracleEmbeddings) => Promise<T>,
+		executor: (embeddings: OracleEmbeddings) => Promise<T>,
 	): Promise<T> {
 		const connection = await this.pool.getConnection();
 		try {
 			const embeddings = new OracleEmbeddings(connection, this.pref, this.proxy);
-			return await callback(embeddings);
+			return await executor(embeddings);
 		} finally {
 			await connection.close();
 		}
 	}
 
-	async embedDocuments(documents: string[]): Promise<number[][]> {
-		return await this.withConnection((embeddings) => embeddings.embedDocuments(documents));
+	override async embedDocuments(documents: string[]): Promise<number[][]> {
+		const result = await this.withConnection(
+			async (embeddings) => await embeddings.embedDocuments(documents),
+		);
+		return result as number[][];
 	}
 
-	async embedQuery(document: string): Promise<number[]> {
-		return await this.withConnection((embeddings) => embeddings.embedQuery(document));
+	override async embedQuery(document: string): Promise<number[]> {
+		const result = await this.withConnection(
+			async (embeddings) => await embeddings.embedQuery(document),
+		);
+		return result as number[];
 	}
 }
 
@@ -84,7 +90,7 @@ export class EmbeddingsOracleDb implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Embeddings Oracle DB',
 		name: 'embeddingsOracleDb',
-		icon: 'file:../../../../../nodes-base/nodes/Oracle/Sql/oracle.svg',
+		icon: 'file:../shared/icons/oracle.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'Use ONNX Embeddings',

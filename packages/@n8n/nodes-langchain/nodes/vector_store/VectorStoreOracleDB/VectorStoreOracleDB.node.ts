@@ -1,11 +1,12 @@
-import type { Embeddings } from '@langchain/core/embeddings';
 import type { Document } from '@langchain/core/documents';
+import type { EmbeddingsInterface } from '@langchain/core/embeddings';
+import { createVectorStoreNode, metadataFilterField } from '@n8n/ai-utilities';
 import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@oracle/langchain-oracledb';
+import oracledb from 'oracledb';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
-import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
+import { ApplicationError } from 'n8n-workflow';
 import type { IExecuteFunctions, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
 
-import { createVectorStoreNode, metadataFilterField } from '@n8n/ai-utilities';
 const sharedFields: INodeProperties[] = [
 	{
 		displayName: 'Table Name',
@@ -44,6 +45,10 @@ const distanceStrategyField: INodeProperties = {
 			name: 'Euclidean Squared',
 			value: DistanceStrategy.EUCLIDEAN_SQUARED,
 		},
+		{
+			name: 'Hamming',
+			value: DistanceStrategy.HAMMING,
+		},
 	],
 };
 
@@ -58,9 +63,39 @@ const retrieveFields: INodeProperties[] = [
 	},
 ];
 
+let oracleClientInitialized = false;
+
+const getPoolConfig = (credentials: OracleDBNodeCredentials) => {
+	const { useThickMode, useSSL, ...dbConfig } = {
+		...credentials,
+		privilege: credentials.privilege || undefined,
+	};
+
+	return { dbConfig, useThickMode };
+};
+
+const createOraclePool = async (credentials: OracleDBNodeCredentials) => {
+	const { dbConfig, useThickMode } = getPoolConfig(credentials);
+
+	if (useThickMode) {
+		if (!oracleClientInitialized) {
+			oracledb.initOracleClient();
+			oracleClientInitialized = true;
+		}
+	} else if (oracleClientInitialized) {
+		throw new ApplicationError('Thin mode can not be used after thick mode initialization');
+	}
+
+	return await oracledb.createPool(dbConfig);
+};
+
+/**
+ * Extends OracleVS so retriever calls merge the node-level filter
+ * with any ad-hoc filter provided at runtime.
+ */
 class ExtendedOracleDBVectorStore extends OracleVS {
 	static async initialize(
-		embeddings: Embeddings,
+		embeddings: EmbeddingsInterface,
 		args: OracleDBVSArgs,
 	): Promise<ExtendedOracleDBVectorStore> {
 		const oracleDBVectorStore = new this(embeddings, args);
@@ -82,7 +117,7 @@ class ExtendedOracleDBVectorStore extends OracleVS {
 export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBVectorStore>({
 	meta: {
 		description: 'Work with your data in OracleDB vector support',
-		icon: 'file:../../../../../nodes-base/nodes/Oracle/Sql/oracle.svg',
+		icon: 'file:../shared/icons/oracle.svg',
 		displayName: 'Oracle Database Vector Store',
 		docsUrl:
 			'https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.vectorstoreoracledb/',
@@ -94,7 +129,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 				testedBy: 'oracleDBConnectionTest',
 			},
 		],
-		operationModes: ['load', 'insert', 'retrieve', 'retrieve-as-tool'],
+		operationModes: ['load', 'insert', 'retrieve', 'retrieve-as-tool', 'update'],
 	},
 	sharedFields,
 	loadFields: retrieveFields,
@@ -102,14 +137,14 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 	async getVectorStoreClient(
 		context: IExecuteFunctions | ISupplyDataFunctions,
 		filter: Record<string, never> | undefined,
-		embeddings: Embeddings,
+		embeddings: EmbeddingsInterface,
 		itemIndex: number,
 	): Promise<ExtendedOracleDBVectorStore> {
 		const tableName = context.getNodeParameter('tableName', itemIndex, '', {
 			extractValue: true,
 		}) as string;
-		const credentials = await context.getCredentials('oracleDBApi');
-		const client = await configureOracleDB.call(context, credentials as OracleDBNodeCredentials);
+		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
+		const client = await createOraclePool(credentials);
 		const query = '';
 		const config: OracleDBVSArgs = {
 			client,
@@ -124,20 +159,28 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			DistanceStrategy.COSINE,
 		) as DistanceStrategy;
 
-		return await ExtendedOracleDBVectorStore.initialize(embeddings, config);
+		const vectorStore = await ExtendedOracleDBVectorStore.initialize(embeddings, config);
+		const originalAddDocuments = vectorStore.addDocuments.bind(vectorStore);
+		vectorStore.addDocuments = async (
+			documents,
+			options,
+		): Promise<Awaited<ReturnType<typeof originalAddDocuments>>> =>
+			await originalAddDocuments(documents, { mutateOnDuplicate: true, ...options });
+
+		return vectorStore;
 	},
 
 	async populateVectorStore(
 		context: IExecuteFunctions | ISupplyDataFunctions,
-		embeddings: Embeddings,
+		embeddings: EmbeddingsInterface,
 		documents: Array<Document<Record<string, unknown>>>,
 		itemIndex: number,
 	): Promise<void> {
 		const tableName = context.getNodeParameter('tableName', itemIndex, '', {
 			extractValue: true,
 		}) as string;
-		const credentials = await context.getCredentials('oracleDBApi');
-		const client = await configureOracleDB.call(context, credentials as OracleDBNodeCredentials);
+		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
+		const client = await createOraclePool(credentials);
 		const query = 'Test';
 		const config: OracleDBVSArgs = {
 			client,
@@ -145,6 +188,17 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			query,
 		};
 
-		await OracleVS.fromDocuments(documents, embeddings, config);
+		try {
+			await OracleVS.fromDocuments(documents, embeddings, config);
+		} finally {
+			await client.close();
+		}
+	},
+
+	releaseVectorStoreClient(vectorStore) {
+		const pool = vectorStore.client;
+		if (pool && typeof pool.close === 'function') {
+			void pool.close().catch(() => {});
+		}
 	},
 }) {}

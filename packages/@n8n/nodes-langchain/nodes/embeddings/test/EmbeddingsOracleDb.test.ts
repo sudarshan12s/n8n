@@ -11,7 +11,7 @@ const mockEmbedQuery = jest.fn();
 const mockEmbedDocuments = jest.fn();
 
 jest.mock('@n8n/ai-utilities', () => {
-	const actual = jest.requireActual('@n8n/ai-utilities');
+	const actual = jest.requireActual<typeof import('@n8n/ai-utilities')>('@n8n/ai-utilities');
 	return {
 		...actual,
 		logWrapper: jest.fn().mockImplementation((instance) => instance),
