@@ -817,6 +817,48 @@ VALUES (
 			delete node.onError;
 		});
 
+		it("should throw when continueOnFail is false and node's onError is continueRegularOutput", async () => {
+			const previousContinueOnFail = continueOnFail;
+			continueOnFail = false;
+
+			const nodeParameters: IDataObject = {
+				operation: 'execute',
+				query: 'SELECT 1 FROM dual',
+				resource: 'database',
+				options: {},
+			};
+
+			const mockThis = createMockExecuteFunction(nodeParameters) as unknown as IExecuteFunctions & {
+				getNode: () => INode;
+			};
+
+			const node = mockThis.getNode();
+			node.onError = 'continueRegularOutput';
+
+			const bugResult = [
+				{
+					json: {
+						message: 'NJS-510: connection timed out during connect() call',
+						error: { name: 'NJS-510', errorNum: 510 },
+					},
+					pairedItem: { item: 0 },
+				},
+			];
+
+			const runQueries = jest.fn().mockResolvedValue(bugResult);
+			const items: INodeExecutionData[] = [{ json: {}, pairedItem: { item: 0, input: undefined } }];
+			const nodeOptions = nodeParameters.options as IDataObject;
+
+			await expect(
+				executeSQL.execute.call(mockThis, runQueries, items, nodeOptions, pool),
+			).rejects.toThrow(/NJS-510/i);
+
+			expect(runQueries).toHaveBeenCalledTimes(1);
+
+			continueOnFail = previousContinueOnFail;
+			delete node.onError;
+		});
+
 		it('should call runQueries with binds passed using bindInfo and single item', async () => {
 			const expectedQuery = 'SELECT :en as name, dname from dept where deptno = :dno';
 			const items = [
