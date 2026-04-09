@@ -342,12 +342,42 @@ ORDER BY atc.COLUMN_NAME`;
 }
 
 export function prepareErrorItem(
-	items: INodeExecutionData[],
+	items: INodeExecutionData[] | undefined,
 	error: IDataObject | NodeOperationError | Error,
 	index: number,
 ): INodeExecutionData {
+	const message =
+		(error as Error).message ??
+		(typeof error === 'object' && error !== null && 'message' in error
+			? String((error as IDataObject).message)
+			: 'Oracle query failed');
+
+	const errorAsObject =
+		typeof error === 'object' && error !== null ? (error as IDataObject) : undefined;
+
+	const serializedError =
+		error instanceof Error
+			? {
+					message: error.message,
+					name: error.name,
+					...(errorAsObject?.code ? { code: errorAsObject.code } : {}),
+					...(errorAsObject?.errorNum ? { errorNum: errorAsObject.errorNum } : {}),
+				}
+			: typeof error === 'object' && error !== null
+				? { ...error }
+				: { message: message };
+
+	const originalItem =
+		items?.[index]?.json && typeof items[index].json === 'object'
+			? (items[index].json as IDataObject)
+			: undefined;
+
 	return {
-		json: { message: error.message, item: { ...items[index].json }, error: { ...error } },
+		json: {
+			...(originalItem ? structuredClone(originalItem) : {}),
+			error: serializedError,
+			message,
+		},
 		pairedItem: { item: index },
 	};
 }
@@ -414,8 +444,10 @@ function _getResponseForOutbinds(
 			const executionData = this.helpers.constructExecutionMetaData(wrapData(normalizedRows[j]), {
 				itemData: { item: j },
 			});
-			if (executionData) {
-				returnData = returnData.concat(executionData);
+			if (executionData?.length) {
+				for (const item of executionData) {
+					returnData.push(item);
+				}
 			}
 		}
 	}
@@ -494,8 +526,20 @@ export function configureQueryRunner(
 			execOptions.fetchTypeHandler = executeFetchHandler;
 		}
 
+		const createErrorItems = (error: NodeOperationError | Error) =>
+			items.length
+				? items.map((_item, index) => prepareErrorItem(items, error, index))
+				: [prepareErrorItem(items, error, 0)];
+
 		if (stmtBatching === 'single' && queries[0].executeManyValues) {
-			const connection = await pool.getConnection();
+			let connection: oracledb.Connection | undefined;
+			try {
+				connection = await pool.getConnection();
+			} catch (caughtError) {
+				const error = parseOracleError(node, caughtError);
+				if (!continueOnFail) throw error;
+				return createErrorItems(error);
+			}
 			try {
 				execOptions = getExecuteManyOptions(options);
 				if (continueOnFail) {
@@ -538,7 +582,7 @@ export function configureQueryRunner(
 			} catch (caughtError) {
 				const error = parseOracleError(node, caughtError);
 				if (!continueOnFail) throw error;
-				return [{ json: { message: error.message, error } }];
+				return createErrorItems(error);
 			} finally {
 				if (connection) {
 					await connection.close();
@@ -546,7 +590,14 @@ export function configureQueryRunner(
 			}
 		} else if (stmtBatching === 'transaction') {
 			execOptions.autoCommit = false; // for transaction mode forcefully overwrite it.
-			const connection = await pool.getConnection();
+			let connection: oracledb.Connection | undefined;
+			try {
+				connection = await pool.getConnection();
+			} catch (caughtError) {
+				const error = parseOracleError(node, caughtError);
+				if (!continueOnFail) throw error;
+				return createErrorItems(error);
+			}
 			try {
 				for (let i = 0; i < queries.length; i++) {
 					try {
@@ -598,12 +649,21 @@ export function configureQueryRunner(
 				}
 
 				// All succeeded, commit
-				await connection.commit();
+				await connection!.commit();
 			} finally {
-				await connection.close();
+				if (connection) {
+					await connection.close();
+				}
 			}
 		} else if (stmtBatching === 'independently') {
-			const connection = await pool.getConnection();
+			let connection: oracledb.Connection | undefined;
+			try {
+				connection = await pool.getConnection();
+			} catch (caughtError) {
+				const error = parseOracleError(node, caughtError);
+				if (!continueOnFail) throw error;
+				return createErrorItems(error);
+			}
 			try {
 				for (let i = 0; i < queries.length; i++) {
 					try {
@@ -650,7 +710,9 @@ export function configureQueryRunner(
 					}
 				}
 			} finally {
-				await connection.close();
+				if (connection) {
+					await connection.close();
+				}
 			}
 		}
 
