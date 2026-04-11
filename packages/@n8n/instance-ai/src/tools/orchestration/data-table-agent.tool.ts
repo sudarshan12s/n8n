@@ -21,7 +21,6 @@ import {
 } from './tracing-utils';
 import { registerWithMastra } from '../../agent/register-with-mastra';
 import { createLlmStepTraceHooks } from '../../runtime/resumable-stream-executor';
-import { traceWorkingMemoryContext } from '../../runtime/working-memory-tracing';
 import { consumeStreamWithHitl } from '../../stream/consume-with-hitl';
 import {
 	buildAgentTraceInputs,
@@ -31,7 +30,7 @@ import {
 } from '../../tracing/langsmith-tracing';
 import type { OrchestrationContext } from '../../types';
 
-const DATA_TABLE_MAX_STEPS = 15;
+const DATA_TABLE_MAX_STEPS = 35;
 
 const DATA_TABLE_TOOL_NAMES = [
 	'list-data-tables',
@@ -45,6 +44,7 @@ const DATA_TABLE_TOOL_NAMES = [
 	'insert-data-table-rows',
 	'update-data-table-rows',
 	'delete-data-table-rows',
+	'parse-file',
 ];
 
 export interface StartDataTableAgentInput {
@@ -120,7 +120,7 @@ export async function startDataTableAgentTask(
 		role: 'data-table-manager',
 		traceContext,
 		plannedTaskId: input.plannedTaskId,
-		run: async (signal, _drainCorrections) => {
+		run: async (signal, _drainCorrections, _waitForCorrection) => {
 			return await withTraceContextActor(traceContext, async () => {
 				const subAgent = new Agent({
 					id: subAgentId,
@@ -154,24 +154,14 @@ export async function startDataTableAgentTask(
 				const traceParent = getTraceParentRun();
 				return await withTraceParentContext(traceParent, async () => {
 					const llmStepTraceHooks = createLlmStepTraceHooks(traceParent);
-					const stream = await traceWorkingMemoryContext(
-						{
-							phase: 'initial',
-							agentId: subAgentId,
-							agentRole: 'data-table-manager',
-							threadId: context.threadId,
-							input: briefing,
+					const stream = await subAgent.stream(briefing, {
+						maxSteps: DATA_TABLE_MAX_STEPS,
+						abortSignal: signal,
+						providerOptions: {
+							anthropic: { cacheControl: { type: 'ephemeral' } },
 						},
-						async () =>
-							await subAgent.stream(briefing, {
-								maxSteps: DATA_TABLE_MAX_STEPS,
-								abortSignal: signal,
-								providerOptions: {
-									anthropic: { cacheControl: { type: 'ephemeral' } },
-								},
-								...(llmStepTraceHooks?.executionOptions ?? {}),
-							}),
-					);
+						...(llmStepTraceHooks?.executionOptions ?? {}),
+					});
 
 					const hitlResult = await consumeStreamWithHitl({
 						agent: subAgent,
@@ -188,7 +178,6 @@ export async function startDataTableAgentTask(
 						abortSignal: signal,
 						waitForConfirmation: context.waitForConfirmation,
 						llmStepTraceHooks,
-						workingMemoryEnabled: false,
 					});
 
 					return await hitlResult.text;
@@ -204,6 +193,20 @@ export async function startDataTableAgentTask(
 	};
 }
 
+export const dataTableAgentInputSchema = z.object({
+	task: z
+		.string()
+		.describe(
+			'What to do: describe the data table operation. Include table names, column details, data to insert, or query criteria.',
+		),
+	conversationContext: z
+		.string()
+		.optional()
+		.describe(
+			'Brief summary of the conversation so far — what was discussed, decisions made, and information gathered. The agent uses this to avoid repeating information the user already knows.',
+		),
+});
+
 export function createDataTableAgentTool(context: OrchestrationContext) {
 	return createTool({
 		id: 'manage-data-tables-with-agent',
@@ -211,24 +214,12 @@ export function createDataTableAgentTool(context: OrchestrationContext) {
 			'Manage data tables using a specialized agent. ' +
 			'The agent handles listing, creating, deleting tables, modifying schemas, ' +
 			'and querying/inserting/updating/deleting rows.',
-		inputSchema: z.object({
-			task: z
-				.string()
-				.describe(
-					'What to do: describe the data table operation. Include table names, column details, data to insert, or query criteria.',
-				),
-			conversationContext: z
-				.string()
-				.optional()
-				.describe(
-					'Brief summary of the conversation so far — what was discussed, decisions made, and information gathered. The agent uses this to avoid repeating information the user already knows.',
-				),
-		}),
+		inputSchema: dataTableAgentInputSchema,
 		outputSchema: z.object({
 			result: z.string(),
 			taskId: z.string(),
 		}),
-		execute: async (input) => {
+		execute: async (input: z.infer<typeof dataTableAgentInputSchema>) => {
 			const result = await startDataTableAgentTask(context, input);
 			return await Promise.resolve({ result: result.result, taskId: result.taskId });
 		},
