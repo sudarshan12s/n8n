@@ -47,7 +47,7 @@ export const generationFields: INodeProperties[] = [
 
 class PooledOracleEmbeddings extends Embeddings {
 	constructor(
-		private readonly pool: oracledb.Pool,
+		private readonly getPool: () => Promise<oracledb.Pool>,
 		private readonly pref: Record<string, unknown>,
 		private readonly proxy?: string,
 	) {
@@ -57,7 +57,8 @@ class PooledOracleEmbeddings extends Embeddings {
 	private async withConnection<T>(
 		executor: (embeddings: OracleEmbeddings) => Promise<T>,
 	): Promise<T> {
-		const connection = await this.pool.getConnection();
+		const pool = await this.getPool();
+		const connection = await pool.getConnection();
 		try {
 			const embeddings = new OracleEmbeddings(connection, this.pref, this.proxy);
 			return await executor(embeddings);
@@ -133,13 +134,13 @@ export class EmbeddingsOracleDb implements INodeType {
 		const modelName = typeof modelParam === 'string' ? modelParam : modelParam.value;
 
 		const credentials = await this.getCredentials('oracleDBApi');
-		const pool = await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
-
 		const pref = {
 			provider: 'database',
 			model: modelName,
 		};
-		const embeddings = new PooledOracleEmbeddings(pool, pref);
+		const getPool = async () =>
+			configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
+		const embeddings = new PooledOracleEmbeddings(getPool, pref);
 
 		return {
 			response: logWrapper(embeddings, this),

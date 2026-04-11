@@ -2,9 +2,9 @@ import type { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { createVectorStoreNode, metadataFilterField } from '@n8n/ai-utilities';
 import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@oracle/langchain-oracledb';
-import oracledb from 'oracledb';
+import type oracledb from 'oracledb';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
-import { ApplicationError } from 'n8n-workflow';
+import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { IExecuteFunctions, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
 
 const sharedFields: INodeProperties[] = [
@@ -63,30 +63,25 @@ const retrieveFields: INodeProperties[] = [
 	},
 ];
 
-let oracleClientInitialized = false;
+class LazyOraclePool {
+	constructor(private readonly getPool: () => Promise<oracledb.Pool>) {}
 
-const getPoolConfig = (credentials: OracleDBNodeCredentials) => {
-	const { useThickMode, useSSL, ...dbConfig } = {
-		...credentials,
-		privilege: credentials.privilege || undefined,
-	};
-
-	return { dbConfig, useThickMode };
-};
-
-const createOraclePool = async (credentials: OracleDBNodeCredentials) => {
-	const { dbConfig, useThickMode } = getPoolConfig(credentials);
-
-	if (useThickMode) {
-		if (!oracleClientInitialized) {
-			oracledb.initOracleClient();
-			oracleClientInitialized = true;
-		}
-	} else if (oracleClientInitialized) {
-		throw new ApplicationError('Thin mode can not be used after thick mode initialization');
+	async getConnection(): Promise<oracledb.Connection> {
+		const pool = await this.getPool();
+		return await pool.getConnection();
 	}
 
-	return await oracledb.createPool(dbConfig);
+	async close(): Promise<void> {
+		// ConnectionPoolManager owns lifecycle; keep the shared pool alive.
+	}
+}
+
+const createLazyOraclePool = (
+	context: IExecuteFunctions | ISupplyDataFunctions,
+	credentials: OracleDBNodeCredentials,
+) => {
+	const getPool = async () => configureOracleDB.call(context, credentials);
+	return new LazyOraclePool(getPool) as unknown as oracledb.Pool;
 };
 
 /**
@@ -144,7 +139,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			extractValue: true,
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
-		const client = await createOraclePool(credentials);
+		const client = createLazyOraclePool(context, credentials);
 		const query = '';
 		const config: OracleDBVSArgs = {
 			client,
@@ -185,7 +180,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			extractValue: true,
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
-		const client = await createOraclePool(credentials);
+		const client = createLazyOraclePool(context, credentials);
 		const query = 'Test';
 		const config: OracleDBVSArgs = {
 			client,
@@ -193,11 +188,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			query,
 		};
 
-		try {
-			await OracleVS.fromDocuments(documents, embeddings, config);
-		} finally {
-			await client.close();
-		}
+		await OracleVS.fromDocuments(documents, embeddings, config);
 	},
 
 	releaseVectorStoreClient(vectorStore) {
