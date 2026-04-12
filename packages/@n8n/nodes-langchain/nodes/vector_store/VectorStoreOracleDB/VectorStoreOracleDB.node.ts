@@ -80,7 +80,7 @@ const createLazyOraclePool = (
 	context: IExecuteFunctions | ISupplyDataFunctions,
 	credentials: OracleDBNodeCredentials,
 ) => {
-	const getPool = async () => configureOracleDB.call(context, credentials);
+	const getPool = async () => await configureOracleDB.call(context, credentials);
 	return new LazyOraclePool(getPool) as unknown as oracledb.Pool;
 };
 

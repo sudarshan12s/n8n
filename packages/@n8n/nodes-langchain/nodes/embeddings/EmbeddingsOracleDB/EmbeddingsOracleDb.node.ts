@@ -139,7 +139,7 @@ export class EmbeddingsOracleDb implements INodeType {
 			model: modelName,
 		};
 		const getPool = async () =>
-			configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
+			await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
 		const embeddings = new PooledOracleEmbeddings(getPool, pref);
 
 		return {
