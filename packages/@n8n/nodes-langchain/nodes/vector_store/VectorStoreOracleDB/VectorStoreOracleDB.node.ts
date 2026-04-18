@@ -2,10 +2,10 @@ import type { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import { createVectorStoreNode, metadataFilterField } from '@n8n/ai-utilities';
 import { DistanceStrategy, OracleVS, type OracleDBVSArgs } from '@oracle/langchain-oracledb';
-import type oracledb from 'oracledb';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/helpers/interfaces';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { IExecuteFunctions, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
+import type oracledb from 'oracledb';
 
 const sharedFields: INodeProperties[] = [
 	{
@@ -15,6 +15,14 @@ const sharedFields: INodeProperties[] = [
 		default: 'n8n_vectors',
 		description:
 			'The table name to store the vectors in. If table does not exist, it will be created.',
+	},
+	{
+		displayName: 'Initialization Text',
+		name: 'initializationText',
+		type: 'string',
+		default: 'n8n vector store initialization text',
+		description:
+			'Sample content used once to determine the embedding dimension when the table is created. Leave the default unless Oracle returns a dimension error.',
 	},
 ];
 
@@ -112,7 +120,7 @@ class ExtendedOracleDBVectorStore extends OracleVS {
 export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBVectorStore>({
 	meta: {
 		description: 'Work with your data in OracleDB vector support',
-		icon: 'file:../shared/icons/oracle.svg',
+		icon: 'file:../../shared/icons/oracle.svg',
 		displayName: 'Oracle Database Vector Store',
 		docsUrl:
 			'https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.vectorstoreoracledb/',
@@ -140,7 +148,16 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
 		const client = createLazyOraclePool(context, credentials);
-		const query = '';
+		const initializationText = context.getNodeParameter(
+			'initializationText',
+			itemIndex,
+			'n8n vector store initialization text',
+			{ extractValue: true },
+		) as string;
+		const query =
+			initializationText.trim() === ''
+				? 'n8n vector store initialization text'
+				: initializationText;
 		const config: OracleDBVSArgs = {
 			client,
 			tableName,
@@ -181,7 +198,16 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
 		const client = createLazyOraclePool(context, credentials);
-		const query = 'Test';
+		const initializationText = context.getNodeParameter(
+			'initializationText',
+			itemIndex,
+			'n8n vector store initialization text',
+			{ extractValue: true },
+		) as string;
+		const query =
+			initializationText.trim() === ''
+				? 'n8n vector store initialization text'
+				: initializationText;
 		const config: OracleDBVSArgs = {
 			client,
 			tableName,

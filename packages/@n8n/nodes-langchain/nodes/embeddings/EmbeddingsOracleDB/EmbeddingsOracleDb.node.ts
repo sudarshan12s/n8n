@@ -91,7 +91,7 @@ export class EmbeddingsOracleDb implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Embeddings Oracle DB',
 		name: 'embeddingsOracleDb',
-		icon: 'file:../shared/icons/oracle.svg',
+		icon: 'file:../../shared/icons/oracle.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'Use ONNX Embeddings',
