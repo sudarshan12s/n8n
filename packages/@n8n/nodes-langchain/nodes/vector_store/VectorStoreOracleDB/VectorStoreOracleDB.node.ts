@@ -16,15 +16,9 @@ const sharedFields: INodeProperties[] = [
 		description:
 			'The table name to store the vectors in. If table does not exist, it will be created.',
 	},
-	{
-		displayName: 'Initialization Text',
-		name: 'initializationText',
-		type: 'string',
-		default: 'n8n vector store initialization text',
-		description:
-			'Sample content used once to determine the embedding dimension when the table is created. Leave the default unless Oracle returns a dimension error.',
-	},
 ];
+
+const DEFAULT_INITIALIZATION_TEXT = 'n8n vector store initialization text';
 
 const distanceStrategyField: INodeProperties = {
 	displayName: 'Distance Strategy',
@@ -68,6 +62,25 @@ const retrieveFields: INodeProperties[] = [
 		placeholder: 'Add Option',
 		default: {},
 		options: [distanceStrategyField, metadataFilterField],
+	},
+];
+
+const insertFields: INodeProperties[] = [
+	{
+		displayName: 'Options',
+		name: 'options',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		options: [
+			{
+				displayName: 'Mutate On Duplicate',
+				name: 'mutateOnDuplicate',
+				type: 'boolean',
+				default: false,
+				description: 'Whether incoming rows overwrite existing rows with the same external ID',
+			},
+		],
 	},
 ];
 
@@ -132,9 +145,10 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 				testedBy: 'oracleDBConnectionTest',
 			},
 		],
-		operationModes: ['load', 'insert', 'retrieve', 'retrieve-as-tool', 'update'],
+		operationModes: ['load', 'insert', 'retrieve', 'retrieve-as-tool'],
 	},
 	sharedFields,
+	insertFields,
 	loadFields: retrieveFields,
 	retrieveFields,
 	async getVectorStoreClient(
@@ -148,16 +162,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
 		const client = createLazyOraclePool(context, credentials);
-		const initializationText = context.getNodeParameter(
-			'initializationText',
-			itemIndex,
-			'n8n vector store initialization text',
-			{ extractValue: true },
-		) as string;
-		const query =
-			initializationText.trim() === ''
-				? 'n8n vector store initialization text'
-				: initializationText;
+		const query = DEFAULT_INITIALIZATION_TEXT;
 		const config: OracleDBVSArgs = {
 			client,
 			tableName,
@@ -171,20 +176,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			DistanceStrategy.COSINE,
 		) as DistanceStrategy;
 
-		const vectorStore = await ExtendedOracleDBVectorStore.initialize(embeddings, config);
-		const mode = context.getNodeParameter('mode', itemIndex, 'retrieve', {
-			extractValue: true,
-		}) as string;
-		if (mode === 'update') {
-			const originalAddDocuments = vectorStore.addDocuments.bind(vectorStore);
-			vectorStore.addDocuments = async (
-				documents,
-				options,
-			): Promise<Awaited<ReturnType<typeof originalAddDocuments>>> =>
-				await originalAddDocuments(documents, { mutateOnDuplicate: true, ...options });
-		}
-
-		return vectorStore;
+		return await ExtendedOracleDBVectorStore.initialize(embeddings, config);
 	},
 
 	async populateVectorStore(
@@ -198,23 +190,25 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 		}) as string;
 		const credentials = (await context.getCredentials('oracleDBApi')) as OracleDBNodeCredentials;
 		const client = createLazyOraclePool(context, credentials);
-		const initializationText = context.getNodeParameter(
-			'initializationText',
-			itemIndex,
-			'n8n vector store initialization text',
-			{ extractValue: true },
-		) as string;
-		const query =
-			initializationText.trim() === ''
-				? 'n8n vector store initialization text'
-				: initializationText;
+		const query = DEFAULT_INITIALIZATION_TEXT;
 		const config: OracleDBVSArgs = {
 			client,
 			tableName,
 			query,
 		};
 
-		await OracleVS.fromDocuments(documents, embeddings, config);
+		const options = context.getNodeParameter('options', itemIndex, {}) as {
+			mutateOnDuplicate?: boolean;
+		};
+
+		const mutateOnDuplicate = Boolean(options?.mutateOnDuplicate);
+
+		await OracleVS.fromDocuments(
+			documents,
+			embeddings,
+			config,
+			mutateOnDuplicate ? { mutateOnDuplicate: true } : undefined,
+		);
 	},
 
 	releaseVectorStoreClient(vectorStore) {

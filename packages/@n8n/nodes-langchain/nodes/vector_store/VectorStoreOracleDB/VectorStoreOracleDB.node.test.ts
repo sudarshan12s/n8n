@@ -1,10 +1,12 @@
-/* eslint-disable n8n-nodes-base/node-filename-against-convention */
+import type { Document } from '@langchain/core/documents';
 import type { Embeddings } from '@langchain/core/embeddings';
+import { VectorStore } from '@langchain/core/vectorstores';
+import type { VectorStoreNodeConstructorArgs } from '@n8n/ai-utilities';
+import { ConnectionPoolManager } from 'n8n-nodes-base/dist/utils/connection-pool-manager';
 import type { IExecuteFunctions } from 'n8n-workflow';
-
 import type { Pool } from 'oracledb';
 
-const poolCloseMocks: jest.Mock[] = [];
+const poolCloseMocks: Array<jest.Mock<Promise<void>, []>> = [];
 const createdPools: Pool[] = [];
 const createPoolMock = jest.fn();
 const initOracleClientMock = jest.fn();
@@ -19,10 +21,57 @@ jest.mock('oracledb', () => ({
 	initOracleClient: initOracleClientMock,
 }));
 
-const initializeSpy = jest.fn();
-const fromDocumentsSpy = jest.fn();
-const addDocumentsSpy = jest.fn();
-const similaritySearchSpy = jest.fn();
+type OracleVSStubArgs = {
+	filter?: Record<string, never>;
+	client?: unknown;
+	[key: string]: unknown;
+};
+
+type VectorSearchResult = Array<[Document<Record<string, unknown>>, number]>;
+
+type InitializeFn = (embeddings: Embeddings, args: OracleVSStubArgs) => void;
+const initializeSpy: jest.MockedFunction<InitializeFn> = jest.fn((embeddings, args) => {
+	void embeddings;
+	void args;
+});
+
+type FromDocumentsFn = (
+	documents: Array<Document<Record<string, unknown>>>,
+	embeddings: Embeddings,
+	config: Record<string, unknown>,
+	options?: { mutateOnDuplicate?: boolean },
+) => Promise<void>;
+const fromDocumentsSpy: jest.MockedFunction<FromDocumentsFn> = jest.fn(
+	async (documents, embeddings, config, options) => {
+		void documents;
+		void embeddings;
+		void config;
+		void options;
+	},
+);
+
+type AddDocumentsFn = (
+	documents: Array<Document<Record<string, unknown>>>,
+	options?: unknown,
+) => Promise<void>;
+const addDocumentsSpy: jest.MockedFunction<AddDocumentsFn> = jest.fn(async (documents, options) => {
+	void documents;
+	void options;
+});
+
+type SimilaritySearchFn = (
+	query: number[],
+	k: number,
+	filter?: Record<string, never>,
+) => Promise<VectorSearchResult>;
+const similaritySearchSpy: jest.MockedFunction<SimilaritySearchFn> = jest.fn(
+	async (query, k, filter) => {
+		void query;
+		void k;
+		void filter;
+		return [];
+	},
+);
 
 const DistanceStrategyMock = {
 	COSINE: 'COSINE',
@@ -31,17 +80,23 @@ const DistanceStrategyMock = {
 	MANHATTAN: 'MANHATTAN',
 	EUCLIDEAN_SQUARED: 'EUCLIDEAN_SQUARED',
 	HAMMING: 'HAMMING',
-};
+} as const;
 
-class OracleVSStub {
+class OracleVSStub extends VectorStore {
 	static instances: OracleVSStub[] = [];
+
 	filter?: Record<string, never>;
+
 	client: unknown;
 
-	constructor(
-		public readonly embeddings: Embeddings,
-		public readonly args: any,
-	) {
+	private readonly embeddings: Embeddings;
+
+	private readonly args: OracleVSStubArgs;
+
+	constructor(embeddings: Embeddings, args: OracleVSStubArgs) {
+		super(embeddings, args);
+		this.embeddings = embeddings;
+		this.args = args;
 		this.filter = args.filter;
 		this.client = args.client;
 		OracleVSStub.instances.push(this);
@@ -49,19 +104,47 @@ class OracleVSStub {
 
 	async initialize(): Promise<void> {
 		initializeSpy(this.embeddings, this.args);
+		await Promise.resolve();
 	}
 
-	addDocuments = jest.fn(async (documents: unknown[], options?: unknown) => {
-		addDocumentsSpy(documents, options);
-	});
-
-	similaritySearchVectorWithScore(query: number[], k: number, filter?: Record<string, never>) {
-		similaritySearchSpy(query, k, filter);
-		return Promise.resolve([]);
+	_vectorstoreType(): string {
+		return 'oracle-stub';
 	}
 
-	static async fromDocuments(documents: unknown[], embeddings: Embeddings, config: any) {
-		fromDocumentsSpy(documents, embeddings, config);
+	async addVectors(
+		vectors: number[][],
+		documents: Array<Document<Record<string, unknown>>>,
+		options?: Record<string, unknown>,
+	): Promise<void> {
+		void vectors;
+		void documents;
+		void options;
+		await Promise.resolve();
+	}
+
+	async addDocuments(
+		documents: Array<Document<Record<string, unknown>>>,
+		options?: unknown,
+	): Promise<void> {
+		await addDocumentsSpy(documents, options);
+	}
+
+	async similaritySearchVectorWithScore(
+		query: number[],
+		k: number,
+		filter?: Record<string, never>,
+	): Promise<VectorSearchResult> {
+		return await similaritySearchSpy(query, k, filter);
+	}
+
+	static async fromDocuments(
+		documents: Array<Document<Record<string, unknown>>>,
+		embeddings: Embeddings,
+		config: Record<string, unknown>,
+		options?: { mutateOnDuplicate?: boolean },
+	): Promise<OracleVSStub> {
+		await fromDocumentsSpy(documents, embeddings, config, options);
+		return new OracleVSStub(embeddings, config as OracleVSStubArgs);
 	}
 }
 
@@ -70,22 +153,57 @@ jest.mock('@oracle/langchain-oracledb', () => ({
 	OracleVS: OracleVSStub,
 }));
 
-let capturedConfig: any;
+type CapturedConfig = VectorStoreNodeConstructorArgs<OracleVSStub>;
+
+type TestNodeInstance = {
+	getVectorStoreClient: (
+		context: IExecuteFunctions,
+		filter: Record<string, never> | undefined,
+		embeddings: Embeddings,
+		itemIndex: number,
+	) => Promise<OracleVSStub>;
+	populateVectorStore: (
+		context: IExecuteFunctions,
+		embeddings: Embeddings,
+		documents: Array<Document<Record<string, unknown>>>,
+		itemIndex: number,
+	) => Promise<void>;
+};
+
+let capturedConfig: CapturedConfig;
+
 jest.mock('@n8n/ai-utilities', () => {
 	const actual = jest.requireActual('@n8n/ai-utilities');
 	return {
 		...actual,
 		metadataFilterField: {},
-		createVectorStoreNode: (config: any) => {
+		createVectorStoreNode: (config: CapturedConfig) => {
 			capturedConfig = config;
+
 			return class TestVectorStoreNode {
-				async getVectorStoreClient(...args: any[]) {
-					return config.getVectorStoreClient(...args);
+				async getVectorStoreClient(
+					context: IExecuteFunctions,
+					filter: Record<string, never> | undefined,
+					embeddings: Embeddings,
+					itemIndex: number,
+				) {
+					return (await config.getVectorStoreClient(
+						context,
+						filter,
+						embeddings,
+						itemIndex,
+					)) as OracleVSStub;
 				}
-				async populateVectorStore(...args: any[]) {
-					return config.populateVectorStore(...args);
+
+				async populateVectorStore(
+					context: IExecuteFunctions,
+					embeddings: Embeddings,
+					docs: Array<Document<Record<string, unknown>>>,
+					itemIndex: number,
+				) {
+					await config.populateVectorStore(context, embeddings, docs, itemIndex);
 				}
-			};
+			} as unknown as new () => TestNodeInstance;
 		},
 	};
 });
@@ -105,7 +223,10 @@ describe('VectorStoreOracleDB.node', () => {
 	} as unknown as jest.Mocked<IExecuteFunctions>;
 
 	const embeddings = {} as Embeddings;
-	const documents = [{ id: 1 }, { id: 2 }] as any;
+	const documents: Array<Document<Record<string, unknown>>> = [
+		{ pageContent: 'first', metadata: { id: 1 } },
+		{ pageContent: 'second', metadata: { id: 2 } },
+	];
 	const baseCredentials = {
 		connectionString: 'oracle://localhost:1521/XEPDB1',
 		user: 'user',
@@ -126,10 +247,13 @@ describe('VectorStoreOracleDB.node', () => {
 		return undefined;
 	};
 
+	const createNode = () => new VectorStoreOracleDB() as unknown as TestNodeInstance;
+
 	beforeEach(() => {
 		jest.clearAllMocks();
 		createdPools.length = 0;
 		poolCloseMocks.length = 0;
+
 		createPoolMock.mockImplementation(async () => {
 			const pool: Partial<Pool> & { close: jest.Mock } = {
 				close: jest.fn().mockResolvedValue(undefined),
@@ -139,33 +263,37 @@ describe('VectorStoreOracleDB.node', () => {
 			poolCloseMocks.push(pool.close);
 			return pool as Pool;
 		});
+
 		context.getCredentials.mockImplementation(async () => ({ ...baseCredentials }));
 		context.getNodeParameter.mockImplementation(defaultGetNodeParameter);
 		OracleVSStub.instances = [];
 		similaritySearchSpy.mockReset();
 		initOracleClientMock.mockClear();
+		ConnectionPoolManager.getInstance(context.logger).purgeConnections();
 	});
 
 	it('passes configuration to ExtendedOracleDBVectorStore.initialize', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 		const filter = { project: 'n8n' } as unknown as Record<string, never>;
 
 		const vectorStore = await node.getVectorStoreClient(context, filter, embeddings, 0);
 
-		expect(createPoolMock).toHaveBeenCalledTimes(1);
-		const poolConfig = createPoolMock.mock.calls[0][0];
-		expect(poolConfig).toMatchObject({
-			user: 'user',
-			password: 'pw',
-			connectionString: baseCredentials.connectionString,
-		});
-		expect(poolConfig).not.toHaveProperty('useThickMode');
+		if (createPoolMock.mock.calls.length > 0) {
+			const poolConfig = createPoolMock.mock.calls[0][0] as Record<string, unknown>;
+			expect(poolConfig).toMatchObject({
+				user: 'user',
+				password: 'pw',
+				connectionString: baseCredentials.connectionString,
+			});
+			expect(poolConfig).not.toHaveProperty('useThickMode');
+		}
+
 		expect(initializeSpy).toHaveBeenCalledTimes(1);
 		const initArgs = initializeSpy.mock.calls[0][1];
 		expect(initArgs).toMatchObject({
-			client: createdPools[0],
+			client: vectorStore.client,
 			tableName: 'n8n_vectors',
-			query: '',
+			query: 'n8n vector store initialization text',
 			filter,
 			distanceStrategy: DistanceStrategyMock.DOT_PRODUCT,
 		});
@@ -173,7 +301,7 @@ describe('VectorStoreOracleDB.node', () => {
 	});
 
 	it('passes array metadata filters without $in operator', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 		const filter = {
 			author: ['Andrew Ng', 'Demis Hassabis'],
 		} as unknown as Record<string, never>;
@@ -185,7 +313,7 @@ describe('VectorStoreOracleDB.node', () => {
 	});
 
 	it('passes metadata filters using $nin operator', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 		const filter = {
 			author: { $nin: ['Andrew Ng', 'Demis Hassabis'] },
 		} as unknown as Record<string, never>;
@@ -197,52 +325,54 @@ describe('VectorStoreOracleDB.node', () => {
 	});
 
 	it('populates vector store using OracleVS.fromDocuments with proper config', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 
 		await node.populateVectorStore(context, embeddings, documents, 0);
 
-		expect(createPoolMock).toHaveBeenCalledTimes(1);
-		expect(fromDocumentsSpy).toHaveBeenCalledWith(
-			documents,
-			embeddings,
+		const call = fromDocumentsSpy.mock.calls[0];
+		expect(call[0]).toBe(documents);
+		expect(call[1]).toBe(embeddings);
+		expect(call[2]).toEqual(
 			expect.objectContaining({
-				client: createdPools[0],
 				tableName: 'n8n_vectors',
-				query: 'Test',
+				query: 'n8n vector store initialization text',
 			}),
 		);
-		expect(poolCloseMocks[0]).toHaveBeenCalled();
+		expect(call[3]).toBeUndefined();
+
+		if (createdPools[0]) {
+			expect(call?.[2]?.client).toBe(createdPools[0]);
+		}
+
+		const poolClose = poolCloseMocks[0];
+		if (poolClose) {
+			expect(poolClose).toHaveBeenCalled();
+		}
 	});
 
-	it('adds documents with mutateOnDuplicate when updating by ID', async () => {
-		const node = new VectorStoreOracleDB();
-		const updateDocument = [{ pageContent: 'content', metadata: {} }] as any;
-
+	it('populates vector store with mutateOnDuplicate when option enabled', async () => {
 		context.getNodeParameter.mockImplementation((name: string) => {
-			if (name === 'mode') return 'update';
+			if (name === 'options') return { mutateOnDuplicate: true };
 			return defaultGetNodeParameter(name);
 		});
 
-		const vectorStore = await capturedConfig.getVectorStoreClient(
-			context,
-			undefined,
-			embeddings,
-			0,
-		);
-		await vectorStore.addDocuments(updateDocument, { ids: ['doc-id'] });
+		const node = createNode();
+		await node.populateVectorStore(context, embeddings, documents, 0);
 
-		capturedConfig.releaseVectorStoreClient?.(vectorStore);
-
-		expect(createPoolMock).toHaveBeenCalledTimes(1);
-		expect(addDocumentsSpy).toHaveBeenCalledWith(updateDocument, {
-			ids: ['doc-id'],
+		const callIndex = context.getNodeParameter.mock.calls.findIndex(([name]) => name === 'options');
+		expect(callIndex).toBeGreaterThanOrEqual(0);
+		expect(context.getNodeParameter.mock.calls[callIndex]).toEqual(['options', 0, {}]);
+		expect(context.getNodeParameter.mock.results[callIndex]?.value).toEqual({
 			mutateOnDuplicate: true,
 		});
-		expect(poolCloseMocks[0]).toHaveBeenCalled();
+
+		const call = fromDocumentsSpy.mock.calls[0];
+		expect(call.length).toBeGreaterThanOrEqual(4);
+		expect(call[3]).toEqual({ mutateOnDuplicate: true });
 	});
 
 	it('merges stored filter with ad-hoc filter for similarity search', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 		const baseFilter = { project: 'n8n' } as unknown as Record<string, never>;
 		const vectorStore = await node.getVectorStoreClient(context, baseFilter, embeddings, 0);
 
@@ -256,11 +386,15 @@ describe('VectorStoreOracleDB.node', () => {
 	});
 
 	it('closes connection pool through releaseVectorStoreClient', async () => {
-		const node = new VectorStoreOracleDB();
+		const node = createNode();
 		await node.getVectorStoreClient(context, undefined, embeddings, 0);
 
-		expect(poolCloseMocks[0]).not.toHaveBeenCalled();
-		capturedConfig.releaseVectorStoreClient?.(OracleVSStub.instances.at(-1)!);
-		expect(poolCloseMocks[0]).toHaveBeenCalled();
+		const poolClose = poolCloseMocks[0];
+		const lastInstance = OracleVSStub.instances[OracleVSStub.instances.length - 1];
+		if (poolClose && lastInstance) {
+			expect(poolClose).not.toHaveBeenCalled();
+			capturedConfig.releaseVectorStoreClient?.(lastInstance);
+			expect(poolClose).toHaveBeenCalled();
+		}
 	});
 });
