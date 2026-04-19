@@ -129,8 +129,9 @@ export class EmbeddingsOracleDb implements INodeType {
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		this.logger.debug('Supply data for embeddings Oracle');
-		const modelParam = this.getNodeParameter('model', itemIndex) as string | { value: string };
-		const modelName = typeof modelParam === 'string' ? modelParam : modelParam.value;
+		const modelName = this.getNodeParameter('model', itemIndex, '', {
+			extractValue: true,
+		}) as string;
 
 		const credentials = await this.getCredentials('oracleDBApi');
 		const pref = {
