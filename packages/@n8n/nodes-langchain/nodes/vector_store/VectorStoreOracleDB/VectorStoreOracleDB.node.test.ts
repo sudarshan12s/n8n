@@ -1,3 +1,4 @@
+// cspell:ignore langchain vectorstores oracledb XEPDB Demis Hassabis
 import type { Document } from '@langchain/core/documents';
 import type { Embeddings } from '@langchain/core/embeddings';
 import { VectorStore } from '@langchain/core/vectorstores';
@@ -41,10 +42,11 @@ type FromDocumentsFn = (
 	config: Record<string, unknown>,
 ) => Promise<void>;
 const fromDocumentsSpy: jest.MockedFunction<FromDocumentsFn> = jest.fn(
-	async (documents, embeddings, config) => {
+	(documents, embeddings, config) => {
 		void documents;
 		void embeddings;
 		void config;
+		return Promise.resolve();
 	},
 );
 
@@ -52,9 +54,10 @@ type AddDocumentsFn = (
 	documents: Array<Document<Record<string, unknown>>>,
 	options?: unknown,
 ) => Promise<void>;
-const addDocumentsSpy: jest.MockedFunction<AddDocumentsFn> = jest.fn(async (documents, options) => {
+const addDocumentsSpy: jest.MockedFunction<AddDocumentsFn> = jest.fn((documents, options) => {
 	void documents;
 	void options;
+	return Promise.resolve();
 });
 
 type SimilaritySearchFn = (
@@ -62,14 +65,12 @@ type SimilaritySearchFn = (
 	k: number,
 	filter?: Record<string, never>,
 ) => Promise<VectorSearchResult>;
-const similaritySearchSpy: jest.MockedFunction<SimilaritySearchFn> = jest.fn(
-	async (query, k, filter) => {
-		void query;
-		void k;
-		void filter;
-		return [];
-	},
-);
+const similaritySearchSpy: jest.MockedFunction<SimilaritySearchFn> = jest.fn((query, k, filter) => {
+	void query;
+	void k;
+	void filter;
+	return Promise.resolve<VectorSearchResult>([]);
+});
 
 const DistanceStrategyMock = {
 	COSINE: 'COSINE',
@@ -87,7 +88,7 @@ class OracleVSStub extends VectorStore {
 
 	client: unknown;
 
-	private readonly embeddings: Embeddings;
+	protected override readonly embeddings: Embeddings;
 
 	private readonly args: OracleVSStubArgs;
 
@@ -170,26 +171,20 @@ type TestNodeInstance = {
 let capturedConfig: CapturedConfig;
 
 jest.mock('@n8n/ai-utilities', () => {
-	const actual = jest.requireActual('@n8n/ai-utilities');
+	const actual = jest.requireActual<typeof import('@n8n/ai-utilities')>('@n8n/ai-utilities');
 	return {
 		...actual,
-		metadataFilterField: {},
 		createVectorStoreNode: (config: CapturedConfig) => {
 			capturedConfig = config;
 
-			return class TestVectorStoreNode {
+			class TestVectorStoreNode implements TestNodeInstance {
 				async getVectorStoreClient(
 					context: IExecuteFunctions,
 					filter: Record<string, never> | undefined,
 					embeddings: Embeddings,
 					itemIndex: number,
 				) {
-					return (await config.getVectorStoreClient(
-						context,
-						filter,
-						embeddings,
-						itemIndex,
-					)) as OracleVSStub;
+					return await config.getVectorStoreClient(context, filter, embeddings, itemIndex);
 				}
 
 				async populateVectorStore(
@@ -200,9 +195,11 @@ jest.mock('@n8n/ai-utilities', () => {
 				) {
 					await config.populateVectorStore(context, embeddings, docs, itemIndex);
 				}
-			} as unknown as new () => TestNodeInstance;
+			}
+
+			return TestVectorStoreNode as unknown as new () => TestNodeInstance;
 		},
-	};
+	} satisfies typeof import('@n8n/ai-utilities');
 });
 
 import { VectorStoreOracleDB } from './VectorStoreOracleDB.node';
@@ -251,17 +248,17 @@ describe('VectorStoreOracleDB.node', () => {
 		createdPools.length = 0;
 		poolCloseMocks.length = 0;
 
-		createPoolMock.mockImplementation(async () => {
+		createPoolMock.mockImplementation(() => {
 			const pool: Partial<Pool> & { close: jest.Mock } = {
 				close: jest.fn().mockResolvedValue(undefined),
 				connectionsOpen: 0,
 			};
 			createdPools.push(pool as Pool);
 			poolCloseMocks.push(pool.close);
-			return pool as Pool;
+			return Promise.resolve(pool as Pool);
 		});
 
-		context.getCredentials.mockImplementation(async () => ({ ...baseCredentials }));
+		context.getCredentials.mockImplementation(() => Promise.resolve({ ...baseCredentials }));
 		context.getNodeParameter.mockImplementation(defaultGetNodeParameter);
 		OracleVSStub.instances = [];
 		similaritySearchSpy.mockReset();
@@ -276,7 +273,7 @@ describe('VectorStoreOracleDB.node', () => {
 		const vectorStore = await node.getVectorStoreClient(context, filter, embeddings, 0);
 
 		if (createPoolMock.mock.calls.length > 0) {
-			const poolConfig = createPoolMock.mock.calls[0][0] as Record<string, unknown>;
+			const poolConfig = createPoolMock.mock.calls[0]?.[0] as Record<string, unknown>;
 			expect(poolConfig).toMatchObject({
 				user: 'user',
 				password: 'pw',
