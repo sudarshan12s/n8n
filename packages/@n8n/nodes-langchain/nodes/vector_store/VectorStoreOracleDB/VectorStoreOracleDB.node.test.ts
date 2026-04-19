@@ -343,6 +343,29 @@ describe('VectorStoreOracleDB.node', () => {
 		expect(vectorStore).toBeInstanceOf(OracleVSStub);
 	});
 
+	describe.each(Object.entries(DistanceStrategyMock))(
+		'sets distance strategy to %s',
+		(strategyName, strategyValue) => {
+			it(`uses ${strategyName} distance strategy`, async () => {
+				const node = createNode();
+				context.getNodeParameter.mockImplementation((name: string) => {
+					if (name === 'tableName') return 'n8n_vectors';
+					if (name === 'options.distanceStrategy') return strategyValue;
+					return undefined;
+				});
+
+				await node.getVectorStoreClient(context, undefined, embeddings, 0);
+
+				const lastCall = initializeSpy.mock.calls.at(-1);
+				if (!lastCall) throw new Error('initializeSpy should have been called');
+				const [, initArgs] = lastCall;
+				expect(initArgs?.distanceStrategy).toBe(strategyValue);
+
+				context.getNodeParameter.mockImplementation(defaultGetNodeParameter);
+			});
+		},
+	);
+
 	it('passes array metadata filters without $in operator', async () => {
 		const node = createNode();
 		const filter = {
