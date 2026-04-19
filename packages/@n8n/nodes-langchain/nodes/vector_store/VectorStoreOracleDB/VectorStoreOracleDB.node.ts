@@ -25,11 +25,12 @@ const NO_ROWS_FOUND_ERROR_MESSAGE = 'No rows found.';
 const isNoRowsFoundError = (error: unknown): error is Error =>
 	error instanceof Error && error.message === NO_ROWS_FOUND_ERROR_MESSAGE;
 
+// eslint-disable-next-line n8n-nodes-base/node-param-default-missing
 const distanceStrategyField: INodeProperties = {
 	displayName: 'Distance Strategy',
 	name: 'distanceStrategy',
 	type: 'options',
-	default: 'cosine',
+	default: DistanceStrategy.COSINE,
 	description: 'The method to calculate the distance between two vectors',
 	options: [
 		{
