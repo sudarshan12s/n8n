@@ -20,6 +20,11 @@ const sharedFields: INodeProperties[] = [
 
 const DEFAULT_INITIALIZATION_TEXT = 'n8n vector store initialization text';
 
+const NO_ROWS_FOUND_ERROR_MESSAGE = 'No rows found.';
+
+const isNoRowsFoundError = (error: unknown): error is Error =>
+	error instanceof Error && error.message === NO_ROWS_FOUND_ERROR_MESSAGE;
+
 const distanceStrategyField: INodeProperties = {
 	displayName: 'Distance Strategy',
 	name: 'distanceStrategy',
@@ -118,7 +123,13 @@ class ExtendedOracleDBVectorStore extends OracleVS {
 		filter?: OracleVS['FilterType'],
 	) {
 		const mergedFilter = { ...this.filter, ...filter };
-		return await super.similaritySearchVectorWithScore(query, k, mergedFilter);
+
+		try {
+			return await super.similaritySearchVectorWithScore(query, k, mergedFilter);
+		} catch (error) {
+			if (isNoRowsFoundError(error)) return [];
+			throw error;
+		}
 	}
 }
 
