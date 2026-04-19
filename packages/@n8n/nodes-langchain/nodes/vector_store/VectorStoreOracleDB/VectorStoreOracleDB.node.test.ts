@@ -1,4 +1,4 @@
-// cspell:ignore langchain vectorstores oracledb XEPDB Demis Hassabis
+// cspell:ignore langchain vectorstores vectorstore oracledb XEPDB Demis Hassabis
 import type { Document } from '@langchain/core/documents';
 import type { Embeddings } from '@langchain/core/embeddings';
 import { VectorStore } from '@langchain/core/vectorstores';
@@ -9,7 +9,7 @@ import type { Pool } from 'oracledb';
 
 const poolCloseMocks: Array<jest.Mock<Promise<void>, []>> = [];
 const createdPools: Pool[] = [];
-const createPoolMock = jest.fn();
+const createPoolMock = jest.fn<Promise<Pool>, [Record<string, unknown>]>();
 const initOracleClientMock = jest.fn();
 
 jest.mock('oracledb', () => ({
@@ -42,11 +42,11 @@ type FromDocumentsFn = (
 	config: Record<string, unknown>,
 ) => Promise<void>;
 const fromDocumentsSpy: jest.MockedFunction<FromDocumentsFn> = jest.fn(
-	(documents, embeddings, config) => {
+	async (documents, embeddings, config) => {
+		await Promise.resolve();
 		void documents;
 		void embeddings;
 		void config;
-		return Promise.resolve();
 	},
 );
 
@@ -54,10 +54,10 @@ type AddDocumentsFn = (
 	documents: Array<Document<Record<string, unknown>>>,
 	options?: unknown,
 ) => Promise<void>;
-const addDocumentsSpy: jest.MockedFunction<AddDocumentsFn> = jest.fn((documents, options) => {
+const addDocumentsSpy: jest.MockedFunction<AddDocumentsFn> = jest.fn(async (documents, options) => {
+	await Promise.resolve();
 	void documents;
 	void options;
-	return Promise.resolve();
 });
 
 type SimilaritySearchFn = (
@@ -65,12 +65,15 @@ type SimilaritySearchFn = (
 	k: number,
 	filter?: Record<string, never>,
 ) => Promise<VectorSearchResult>;
-const similaritySearchSpy: jest.MockedFunction<SimilaritySearchFn> = jest.fn((query, k, filter) => {
-	void query;
-	void k;
-	void filter;
-	return Promise.resolve<VectorSearchResult>([]);
-});
+const similaritySearchSpy: jest.MockedFunction<SimilaritySearchFn> = jest.fn(
+	async (query, k, filter) => {
+		await Promise.resolve();
+		void query;
+		void k;
+		void filter;
+		return [];
+	},
+);
 
 const DistanceStrategyMock = {
 	COSINE: 'COSINE',
@@ -88,7 +91,7 @@ class OracleVSStub extends VectorStore {
 
 	client: unknown;
 
-	protected override readonly embeddings: Embeddings;
+	override readonly embeddings: Embeddings;
 
 	private readonly args: OracleVSStubArgs;
 
@@ -151,8 +154,6 @@ jest.mock('@oracle/langchain-oracledb', () => ({
 	OracleVS: OracleVSStub,
 }));
 
-type CapturedConfig = VectorStoreNodeConstructorArgs<OracleVSStub>;
-
 type TestNodeInstance = {
 	getVectorStoreClient: (
 		context: IExecuteFunctions,
@@ -168,38 +169,78 @@ type TestNodeInstance = {
 	) => Promise<void>;
 };
 
-let capturedConfig: CapturedConfig;
+type ReleaseVectorStoreClient = ((vectorStore: OracleVSStub) => void) | undefined;
+let capturedReleaseVectorStoreClient: ReleaseVectorStoreClient;
+let capturedConfig: VectorStoreNodeConstructorArgs<OracleVSStub> | undefined;
+
+type CreateVectorStoreNode = <T extends VectorStore = VectorStore>(
+	args: VectorStoreNodeConstructorArgs<T>,
+) => new () => unknown;
+
+type AiUtilitiesModule = {
+	createVectorStoreNode: CreateVectorStoreNode;
+	[key: string]: unknown;
+};
 
 jest.mock('@n8n/ai-utilities', () => {
-	const actual = jest.requireActual<typeof import('@n8n/ai-utilities')>('@n8n/ai-utilities');
-	return {
-		...actual,
-		createVectorStoreNode: (config: CapturedConfig) => {
-			capturedConfig = config;
+	const actual = jest.requireActual<AiUtilitiesModule>('@n8n/ai-utilities');
 
-			class TestVectorStoreNode implements TestNodeInstance {
-				async getVectorStoreClient(
-					context: IExecuteFunctions,
-					filter: Record<string, never> | undefined,
-					embeddings: Embeddings,
-					itemIndex: number,
-				) {
-					return await config.getVectorStoreClient(context, filter, embeddings, itemIndex);
-				}
+	const createVectorStoreNodeOverride: CreateVectorStoreNode = <
+		T extends VectorStore = VectorStore,
+	>(
+		config: VectorStoreNodeConstructorArgs<T>,
+	) => {
+		if (
+			config.meta?.name === 'vectorStoreOracleDBVector' &&
+			typeof config.releaseVectorStoreClient === 'function'
+		) {
+			const releaseVectorStoreClient = config.releaseVectorStoreClient as (vectorStore: T) => void;
 
-				async populateVectorStore(
-					context: IExecuteFunctions,
-					embeddings: Embeddings,
-					docs: Array<Document<Record<string, unknown>>>,
-					itemIndex: number,
-				) {
-					await config.populateVectorStore(context, embeddings, docs, itemIndex);
-				}
+			capturedReleaseVectorStoreClient = (vectorStore: OracleVSStub) =>
+				releaseVectorStoreClient(vectorStore as unknown as T);
+			capturedConfig = config as VectorStoreNodeConstructorArgs<OracleVSStub>;
+		} else {
+			capturedReleaseVectorStoreClient = undefined;
+			capturedConfig = undefined;
+		}
+
+		const BaseClass = actual.createVectorStoreNode(config);
+
+		class TestVectorStoreNode extends (BaseClass as new () => unknown) implements TestNodeInstance {
+			async getVectorStoreClient(
+				context: IExecuteFunctions,
+				filter: Record<string, never> | undefined,
+				embeddings: Embeddings,
+				itemIndex: number,
+			): Promise<OracleVSStub> {
+				if (!capturedConfig) throw new Error('Vector store config not captured');
+				const vectorStore = await capturedConfig.getVectorStoreClient(
+					context,
+					filter,
+					embeddings,
+					itemIndex,
+				);
+				return vectorStore;
 			}
 
-			return TestVectorStoreNode as unknown as new () => TestNodeInstance;
-		},
-	} satisfies typeof import('@n8n/ai-utilities');
+			async populateVectorStore(
+				context: IExecuteFunctions,
+				embeddings: Embeddings,
+				docs: Array<Document<Record<string, unknown>>>,
+				itemIndex: number,
+			): Promise<void> {
+				if (!capturedConfig) throw new Error('Vector store config not captured');
+				await capturedConfig.populateVectorStore(context, embeddings, docs, itemIndex);
+			}
+		}
+
+		return TestVectorStoreNode as ReturnType<CreateVectorStoreNode>;
+	};
+
+	return {
+		...actual,
+		createVectorStoreNode: createVectorStoreNodeOverride,
+	};
 });
 
 import { VectorStoreOracleDB } from './VectorStoreOracleDB.node';
@@ -248,17 +289,21 @@ describe('VectorStoreOracleDB.node', () => {
 		createdPools.length = 0;
 		poolCloseMocks.length = 0;
 
-		createPoolMock.mockImplementation(() => {
+		createPoolMock.mockImplementation(async () => {
+			await Promise.resolve();
 			const pool: Partial<Pool> & { close: jest.Mock } = {
 				close: jest.fn().mockResolvedValue(undefined),
 				connectionsOpen: 0,
 			};
 			createdPools.push(pool as Pool);
 			poolCloseMocks.push(pool.close);
-			return Promise.resolve(pool as Pool);
+			return pool as Pool;
 		});
 
-		context.getCredentials.mockImplementation(() => Promise.resolve({ ...baseCredentials }));
+		context.getCredentials.mockImplementation(async () => {
+			await Promise.resolve();
+			return { ...baseCredentials };
+		});
 		context.getNodeParameter.mockImplementation(defaultGetNodeParameter);
 		OracleVSStub.instances = [];
 		similaritySearchSpy.mockReset();
@@ -273,7 +318,7 @@ describe('VectorStoreOracleDB.node', () => {
 		const vectorStore = await node.getVectorStoreClient(context, filter, embeddings, 0);
 
 		if (createPoolMock.mock.calls.length > 0) {
-			const poolConfig = createPoolMock.mock.calls[0]?.[0] as Record<string, unknown>;
+			const poolConfig = createPoolMock.mock.calls[0]?.[0];
 			expect(poolConfig).toMatchObject({
 				user: 'user',
 				password: 'pw',
@@ -283,7 +328,11 @@ describe('VectorStoreOracleDB.node', () => {
 		}
 
 		expect(initializeSpy).toHaveBeenCalledTimes(1);
-		const initArgs = initializeSpy.mock.calls[0][1];
+		const firstInitializeCall = initializeSpy.mock.calls[0];
+		if (!firstInitializeCall) {
+			throw new Error('initializeSpy should have been called');
+		}
+		const [, initArgs] = firstInitializeCall;
 		expect(initArgs).toMatchObject({
 			client: vectorStore.client,
 			tableName: 'n8n_vectors',
@@ -302,7 +351,11 @@ describe('VectorStoreOracleDB.node', () => {
 
 		await node.getVectorStoreClient(context, filter, embeddings, 0);
 
-		const initArgs = initializeSpy.mock.calls.at(-1)?.[1];
+		const lastInitializeCall = initializeSpy.mock.calls.at(-1);
+		if (!lastInitializeCall) {
+			throw new Error('initializeSpy should have been called');
+		}
+		const [, initArgs] = lastInitializeCall;
 		expect(initArgs?.filter).toEqual(filter);
 	});
 
@@ -314,7 +367,11 @@ describe('VectorStoreOracleDB.node', () => {
 
 		await node.getVectorStoreClient(context, filter, embeddings, 0);
 
-		const initArgs = initializeSpy.mock.calls.at(-1)?.[1];
+		const lastInitializeCall = initializeSpy.mock.calls.at(-1);
+		if (!lastInitializeCall) {
+			throw new Error('initializeSpy should have been called');
+		}
+		const [, initArgs] = lastInitializeCall;
 		expect(initArgs?.filter).toEqual(filter);
 	});
 
@@ -323,10 +380,14 @@ describe('VectorStoreOracleDB.node', () => {
 
 		await node.populateVectorStore(context, embeddings, documents, 0);
 
-		const call = fromDocumentsSpy.mock.calls[0];
-		expect(call[0]).toBe(documents);
-		expect(call[1]).toBe(embeddings);
-		expect(call[2]).toEqual(
+		const firstCall = fromDocumentsSpy.mock.calls[0];
+		if (!firstCall) {
+			throw new Error('fromDocumentsSpy should have been called');
+		}
+		const [callDocuments, callEmbeddings, callConfig] = firstCall;
+		expect(callDocuments).toBe(documents);
+		expect(callEmbeddings).toBe(embeddings);
+		expect(callConfig).toEqual(
 			expect.objectContaining({
 				tableName: 'n8n_vectors',
 				query: 'n8n vector store initialization text',
@@ -334,7 +395,7 @@ describe('VectorStoreOracleDB.node', () => {
 		);
 
 		if (createdPools[0]) {
-			expect(call?.[2]?.client).toBe(createdPools[0]);
+			expect(callConfig).toEqual(expect.objectContaining({ client: createdPools[0] }));
 		}
 
 		const poolClose = poolCloseMocks[0];
@@ -365,7 +426,7 @@ describe('VectorStoreOracleDB.node', () => {
 		const lastInstance = OracleVSStub.instances[OracleVSStub.instances.length - 1];
 		if (poolClose && lastInstance) {
 			expect(poolClose).not.toHaveBeenCalled();
-			capturedConfig.releaseVectorStoreClient?.(lastInstance);
+			capturedReleaseVectorStoreClient?.(lastInstance);
 			expect(poolClose).toHaveBeenCalled();
 		}
 	});

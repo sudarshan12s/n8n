@@ -111,7 +111,7 @@ export class EmbeddingsOracleDb implements INodeType {
 			resources: {
 				primaryDocumentation: [
 					{
-						url: 'https://docs.oracle.com/en/database/oracle/oracle-database/23/vecse/import-onnx-models-oracle-database-end-end-example.html',
+						url: 'https://docs.oracle.com/en/database/oracle/oracle-database/26/vecse/import-onnx-models-oracle-ai-database-end-end-example.html',
 					},
 				],
 			},

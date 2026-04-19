@@ -2,30 +2,37 @@ import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transpor
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
 import type { ILoadOptionsFunctions, INodeListSearchResult } from 'n8n-workflow';
 
+type MiningModelRow = [string, string?, string?];
+
 export async function searchModels(
 	this: ILoadOptionsFunctions,
-	_filter?: string,
+	filter = '',
 ): Promise<INodeListSearchResult> {
 	const credentials = await this.getCredentials('oracleDBApi');
-
 	const pool = await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
-
 	const connection = await pool.getConnection();
 
 	try {
-		const result = await connection.execute(
+		const result = await connection.execute<MiningModelRow>(
 			'select model_name, algorithm, mining_function from user_mining_models',
 		);
-		const models = result.rows;
 
-		return {
-			results: models
-				? models.map((model: any) => ({
-						name: model[0],
-						value: model[0],
-					}))
-				: [],
-		};
+		const rows = (result.rows ?? []).filter(
+			(row): row is MiningModelRow => Array.isArray(row) && typeof row[0] === 'string',
+		);
+
+		const normalizedFilter = filter.trim().toLowerCase();
+
+		const models = rows
+			.filter(([modelName]) =>
+				normalizedFilter ? modelName.toLowerCase().includes(normalizedFilter) : true,
+			)
+			.map(([modelName]) => ({
+				name: modelName,
+				value: modelName,
+			}));
+
+		return { results: models };
 	} finally {
 		await connection.close();
 	}
