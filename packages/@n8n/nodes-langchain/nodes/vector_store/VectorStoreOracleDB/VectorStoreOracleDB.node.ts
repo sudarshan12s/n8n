@@ -72,15 +72,7 @@ const insertFields: INodeProperties[] = [
 		type: 'collection',
 		placeholder: 'Add Option',
 		default: {},
-		options: [
-			{
-				displayName: 'Mutate On Duplicate',
-				name: 'mutateOnDuplicate',
-				type: 'boolean',
-				default: false,
-				description: 'Whether incoming rows overwrite existing rows with the same external ID',
-			},
-		],
+		options: [],
 	},
 ];
 
@@ -197,18 +189,7 @@ export class VectorStoreOracleDB extends createVectorStoreNode<ExtendedOracleDBV
 			query,
 		};
 
-		const options = context.getNodeParameter('options', itemIndex, {}) as {
-			mutateOnDuplicate?: boolean;
-		};
-
-		const mutateOnDuplicate = Boolean(options?.mutateOnDuplicate);
-
-		await OracleVS.fromDocuments(
-			documents,
-			embeddings,
-			config,
-			mutateOnDuplicate ? { mutateOnDuplicate: true } : undefined,
-		);
+		await OracleVS.fromDocuments(documents, embeddings, config);
 	},
 
 	releaseVectorStoreClient(vectorStore) {

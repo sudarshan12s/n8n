@@ -49,7 +49,6 @@ class PooledOracleEmbeddings extends Embeddings {
 	constructor(
 		private readonly getPool: () => Promise<oracledb.Pool>,
 		private readonly pref: Record<string, unknown>,
-		private readonly proxy?: string,
 	) {
 		super({});
 	}
@@ -60,7 +59,7 @@ class PooledOracleEmbeddings extends Embeddings {
 		const pool = await this.getPool();
 		const connection = await pool.getConnection();
 		try {
-			const embeddings = new OracleEmbeddings(connection, this.pref, this.proxy);
+			const embeddings = new OracleEmbeddings(connection, this.pref);
 			return await executor(embeddings);
 		} finally {
 			await connection.close();

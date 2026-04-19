@@ -39,14 +39,12 @@ type FromDocumentsFn = (
 	documents: Array<Document<Record<string, unknown>>>,
 	embeddings: Embeddings,
 	config: Record<string, unknown>,
-	options?: { mutateOnDuplicate?: boolean },
 ) => Promise<void>;
 const fromDocumentsSpy: jest.MockedFunction<FromDocumentsFn> = jest.fn(
-	async (documents, embeddings, config, options) => {
+	async (documents, embeddings, config) => {
 		void documents;
 		void embeddings;
 		void config;
-		void options;
 	},
 );
 
@@ -141,9 +139,8 @@ class OracleVSStub extends VectorStore {
 		documents: Array<Document<Record<string, unknown>>>,
 		embeddings: Embeddings,
 		config: Record<string, unknown>,
-		options?: { mutateOnDuplicate?: boolean },
 	): Promise<OracleVSStub> {
-		await fromDocumentsSpy(documents, embeddings, config, options);
+		await fromDocumentsSpy(documents, embeddings, config);
 		return new OracleVSStub(embeddings, config as OracleVSStubArgs);
 	}
 }
@@ -338,7 +335,6 @@ describe('VectorStoreOracleDB.node', () => {
 				query: 'n8n vector store initialization text',
 			}),
 		);
-		expect(call[3]).toBeUndefined();
 
 		if (createdPools[0]) {
 			expect(call?.[2]?.client).toBe(createdPools[0]);
@@ -348,27 +344,6 @@ describe('VectorStoreOracleDB.node', () => {
 		if (poolClose) {
 			expect(poolClose).toHaveBeenCalled();
 		}
-	});
-
-	it('populates vector store with mutateOnDuplicate when option enabled', async () => {
-		context.getNodeParameter.mockImplementation((name: string) => {
-			if (name === 'options') return { mutateOnDuplicate: true };
-			return defaultGetNodeParameter(name);
-		});
-
-		const node = createNode();
-		await node.populateVectorStore(context, embeddings, documents, 0);
-
-		const callIndex = context.getNodeParameter.mock.calls.findIndex(([name]) => name === 'options');
-		expect(callIndex).toBeGreaterThanOrEqual(0);
-		expect(context.getNodeParameter.mock.calls[callIndex]).toEqual(['options', 0, {}]);
-		expect(context.getNodeParameter.mock.results[callIndex]?.value).toEqual({
-			mutateOnDuplicate: true,
-		});
-
-		const call = fromDocumentsSpy.mock.calls[0];
-		expect(call.length).toBeGreaterThanOrEqual(4);
-		expect(call[3]).toEqual({ mutateOnDuplicate: true });
 	});
 
 	it('merges stored filter with ad-hoc filter for similarity search', async () => {
