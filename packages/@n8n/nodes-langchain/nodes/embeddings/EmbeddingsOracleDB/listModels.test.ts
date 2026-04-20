@@ -1,4 +1,3 @@
-/* eslint-disable n8n-nodes-base/node-filename-against-convention */
 import type { ILoadOptionsFunctions } from 'n8n-workflow';
 
 const configureOracleDBMock = jest.fn();
@@ -6,7 +5,7 @@ jest.mock('n8n-nodes-base/dist/nodes/Oracle/Sql/transport', () => ({
 	configureOracleDB: configureOracleDBMock,
 }));
 
-const { searchModels } = require('./listModels');
+import { searchModels } from './listModels';
 
 describe('EmbeddingsOracleDB listModels', () => {
 	const connection = {
@@ -33,10 +32,7 @@ describe('EmbeddingsOracleDB listModels', () => {
 		configureOracleDBMock.mockResolvedValue(pool);
 		pool.getConnection = jest.fn().mockResolvedValue(connection);
 		connection.execute = jest.fn().mockResolvedValue({
-			rows: [
-				['MODEL_A', 'ALGO', 'FUNCTION'],
-				['MODEL_B', 'ALGO', 'FUNCTION'],
-			],
+			rows: [['MODEL_A'], ['MODEL_B']],
 		});
 		connection.close = jest.fn().mockResolvedValue(undefined);
 		context.getCredentials.mockResolvedValue({ user: 'user', password: 'pw' });
@@ -47,9 +43,7 @@ describe('EmbeddingsOracleDB listModels', () => {
 
 		expect(configureOracleDBMock).toHaveBeenCalledWith({ user: 'user', password: 'pw' });
 		expect(pool.getConnection).toHaveBeenCalledTimes(1);
-		expect(connection.execute).toHaveBeenCalledWith(
-			'select model_name, algorithm, mining_function from user_mining_models',
-		);
+		expect(connection.execute).toHaveBeenCalledWith('select model_name from user_mining_models');
 		expect(connection.close).toHaveBeenCalledTimes(1);
 		expect(result).toEqual({
 			results: [

@@ -2,7 +2,7 @@ import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transpor
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
 import type { ILoadOptionsFunctions, INodeListSearchResult } from 'n8n-workflow';
 
-type MiningModelRow = [string, string?, string?];
+type MiningModelRow = [string];
 
 export async function searchModels(
 	this: ILoadOptionsFunctions,
@@ -14,7 +14,7 @@ export async function searchModels(
 
 	try {
 		const result = await connection.execute<MiningModelRow>(
-			'select model_name, algorithm, mining_function from user_mining_models',
+			'select model_name from user_mining_models',
 		);
 
 		const rows = (result.rows ?? []).filter(
