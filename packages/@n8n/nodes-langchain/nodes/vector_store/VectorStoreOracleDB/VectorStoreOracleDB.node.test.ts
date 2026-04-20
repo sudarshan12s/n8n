@@ -175,7 +175,7 @@ let capturedConfig: VectorStoreNodeConstructorArgs<OracleVSStub> | undefined;
 
 type CreateVectorStoreNode = <T extends VectorStore = VectorStore>(
 	args: VectorStoreNodeConstructorArgs<T>,
-) => new () => unknown;
+) => new () => Record<string, unknown>;
 
 type AiUtilitiesModule = {
 	createVectorStoreNode: CreateVectorStoreNode;
@@ -198,7 +198,7 @@ jest.mock('@n8n/ai-utilities', () => {
 
 			capturedReleaseVectorStoreClient = (vectorStore: OracleVSStub) =>
 				releaseVectorStoreClient(vectorStore as unknown as T);
-			capturedConfig = config as VectorStoreNodeConstructorArgs<OracleVSStub>;
+			capturedConfig = config as unknown as VectorStoreNodeConstructorArgs<OracleVSStub>;
 		} else {
 			capturedReleaseVectorStoreClient = undefined;
 			capturedConfig = undefined;
@@ -206,7 +206,10 @@ jest.mock('@n8n/ai-utilities', () => {
 
 		const BaseClass = actual.createVectorStoreNode(config);
 
-		class TestVectorStoreNode extends (BaseClass as new () => unknown) implements TestNodeInstance {
+		class TestVectorStoreNode
+			extends (BaseClass as new () => Record<string, unknown>)
+			implements TestNodeInstance
+		{
 			async getVectorStoreClient(
 				context: IExecuteFunctions,
 				filter: Record<string, never> | undefined,
