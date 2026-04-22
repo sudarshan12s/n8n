@@ -5,9 +5,7 @@ import { OracleEmbeddings } from '@oracle/langchain-oracledb';
 import { configureOracleDB } from 'n8n-nodes-base/dist/nodes/Oracle/Sql/transport';
 import type { OracleDBNodeCredentials } from 'n8n-nodes-base/nodes/Oracle/Sql/helpers/interfaces';
 import {
-	NodeOperationError,
 	NodeConnectionTypes,
-	type INode,
 	type INodeProperties,
 	type INodeType,
 	type INodeTypeDescription,
@@ -17,6 +15,14 @@ import {
 import type oracledb from 'oracledb';
 
 import { searchModels } from './listModels';
+
+// Local type augmentation to avoid lint noise about unknown return types; remove once upstream adds them.
+declare module '@oracle/langchain-oracledb' {
+	interface OracleEmbeddings {
+		embedDocuments(documents: string[]): Promise<number[][]>;
+		embedQuery(document: string): Promise<number[]>;
+	}
+}
 
 export const generationFields: INodeProperties[] = [
 	{
@@ -51,8 +57,6 @@ class PooledOracleEmbeddings extends Embeddings {
 	constructor(
 		private readonly getPool: () => Promise<oracledb.Pool>,
 		private readonly pref: Record<string, unknown>,
-		private readonly node: INode,
-		private readonly itemIndex: number,
 	) {
 		super({});
 	}
@@ -70,67 +74,16 @@ class PooledOracleEmbeddings extends Embeddings {
 		}
 	}
 
-	private ensureFiniteNumber({
-		value,
-		vectorIndex,
-		valueIndex,
-	}: {
-		value: unknown;
-		vectorIndex: number;
-		valueIndex: number;
-	}): number {
-		if (typeof value === 'number' && Number.isFinite(value)) return value;
-
-		throw new NodeOperationError(this.node, 'Oracle embeddings returned a non-numeric value.', {
-			itemIndex: this.itemIndex,
-			description: `Expected a finite number at vector ${vectorIndex}, position ${valueIndex}, received ${typeof value}.`,
-		});
-	}
-
-	private ensureEmbeddingVector(vector: unknown, vectorIndex: number): number[] {
-		if (!Array.isArray(vector)) {
-			throw new NodeOperationError(
-				this.node,
-				'Oracle embeddings returned an invalid embedding vector.',
-				{
-					itemIndex: this.itemIndex,
-					description: `Expected an array for vector ${vectorIndex}, received ${typeof vector}.`,
-				},
-			);
-		}
-
-		return vector.map((value, valueIndex) =>
-			this.ensureFiniteNumber({ value, vectorIndex, valueIndex }),
+	override async embedDocuments(documents: string[]): Promise<number[][]> {
+		return await this.withConnection<number[][]>(
+			async (embeddings) => await embeddings.embedDocuments(documents),
 		);
 	}
 
-	private ensureEmbeddingMatrix(matrix: unknown): number[][] {
-		if (!Array.isArray(matrix)) {
-			throw new NodeOperationError(
-				this.node,
-				'Oracle embeddings returned malformed document embeddings.',
-				{
-					itemIndex: this.itemIndex,
-					description: `Expected an array of vectors, received ${typeof matrix}.`,
-				},
-			);
-		}
-
-		return matrix.map((vector, index) => this.ensureEmbeddingVector(vector, index));
-	}
-
-	override async embedDocuments(documents: string[]): Promise<number[][]> {
-		return await this.withConnection<number[][]>(async (embeddings) => {
-			const rawEmbeddings: unknown = await embeddings.embedDocuments(documents);
-			return this.ensureEmbeddingMatrix(rawEmbeddings);
-		});
-	}
-
 	override async embedQuery(document: string): Promise<number[]> {
-		return await this.withConnection<number[]>(async (embeddings) => {
-			const rawEmbedding: unknown = await embeddings.embedQuery(document);
-			return this.ensureEmbeddingVector(rawEmbedding, 0);
-		});
+		return await this.withConnection<number[]>(
+			async (embeddings) => await embeddings.embedQuery(document),
+		);
 	}
 }
 
@@ -191,10 +144,9 @@ export class EmbeddingsOracleDb implements INodeType {
 			provider: 'database',
 			model: modelName,
 		};
-		const node = this.getNode();
 		const getPool = async () =>
 			await configureOracleDB.call(this, credentials as OracleDBNodeCredentials);
-		const embeddings = new PooledOracleEmbeddings(getPool, pref, node, itemIndex);
+		const embeddings = new PooledOracleEmbeddings(getPool, pref);
 
 		return {
 			response: logWrapper(embeddings, this),

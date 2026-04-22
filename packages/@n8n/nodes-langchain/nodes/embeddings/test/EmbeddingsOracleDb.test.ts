@@ -1,7 +1,8 @@
-/* eslint-disable n8n-nodes-base/node-filename-against-convention */
-import type oracledb from 'oracledb';
+// cspell:ignore langchain oracledb ONNX
 import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
+import type * as AiUtilitiesModule from '@n8n/ai-utilities';
 import type { INode, ISupplyDataFunctions } from 'n8n-workflow';
+import type oracledb from 'oracledb';
 
 import { EmbeddingsOracleDb } from '../EmbeddingsOracleDB/EmbeddingsOracleDb.node';
 
@@ -11,10 +12,11 @@ const mockEmbedQuery = jest.fn();
 const mockEmbedDocuments = jest.fn();
 
 jest.mock('@n8n/ai-utilities', () => {
-	const actual = jest.requireActual<typeof import('@n8n/ai-utilities')>('@n8n/ai-utilities');
+	const actual = jest.requireActual<typeof AiUtilitiesModule>('@n8n/ai-utilities');
+	const logWrapperMock: typeof actual.logWrapper = (instance) => instance;
 	return {
 		...actual,
-		logWrapper: jest.fn().mockImplementation((instance) => instance),
+		logWrapper: jest.fn(logWrapperMock),
 	};
 });
 
@@ -26,9 +28,10 @@ jest.mock('@oracle/langchain-oracledb', () => ({
 }));
 
 jest.mock('n8n-nodes-base/dist/nodes/Oracle/Sql/transport', () => ({
-	configureOracleDB: jest.fn().mockImplementation(async () => ({
-		getConnection: mockGetConnection,
-	})),
+	configureOracleDB: jest.fn(async () => {
+		await Promise.resolve();
+		return { getConnection: mockGetConnection };
+	}),
 }));
 
 describe('EmbeddingsOracleDb', () => {
@@ -78,9 +81,13 @@ describe('EmbeddingsOracleDb', () => {
 
 	it('borrows and releases a connection per embedding call', async () => {
 		const supplyData = await node.supplyData.call(context, 0);
+		const embeddingsResponse = supplyData.response as {
+			embedQuery: typeof mockEmbedQuery;
+			embedDocuments: typeof mockEmbedDocuments;
+		};
 
-		await supplyData.response.embedQuery('hello world');
-		await supplyData.response.embedDocuments(['doc one', 'doc two']);
+		await embeddingsResponse.embedQuery('hello world');
+		await embeddingsResponse.embedDocuments(['doc one', 'doc two']);
 
 		expect(mockGetConnection).toHaveBeenCalledTimes(2);
 		expect(mockEmbedQuery).toHaveBeenCalledWith('hello world');
@@ -92,8 +99,12 @@ describe('EmbeddingsOracleDb', () => {
 		mockEmbedQuery.mockRejectedValueOnce(new Error('oracle failure'));
 
 		const supplyData = await node.supplyData.call(context, 0);
+		const embeddingsResponse = supplyData.response as {
+			embedQuery: typeof mockEmbedQuery;
+			embedDocuments: typeof mockEmbedDocuments;
+		};
 
-		await expect(supplyData.response.embedQuery('boom')).rejects.toThrow('oracle failure');
+		await expect(embeddingsResponse.embedQuery('boom')).rejects.toThrow('oracle failure');
 		expect(mockGetConnection).toHaveBeenCalledTimes(1);
 		expect(mockClose).toHaveBeenCalledTimes(1);
 	});
