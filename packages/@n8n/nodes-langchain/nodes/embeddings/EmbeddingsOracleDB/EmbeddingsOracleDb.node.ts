@@ -16,7 +16,8 @@ import type oracledb from 'oracledb';
 
 import { searchModels } from './listModels';
 
-// Local type augmentation to avoid lint noise about unknown return types; remove once upstream adds them.
+// Local type augmentation to avoid lint noise about unknown return types;
+// remove once upstream adds them.
 declare module '@oracle/langchain-oracledb' {
 	interface OracleEmbeddings {
 		embedDocuments(documents: string[]): Promise<number[][]>;
@@ -53,6 +54,11 @@ export const generationFields: INodeProperties[] = [
 	},
 ];
 
+/**
+ * Wraps the Oracle embeddings implementation so we can always borrow
+ * a connection from n8n's pooled Oracle client right before each call.
+ * This keeps connection lifecycle aligned with the existing pool manager.
+ */
 class PooledOracleEmbeddings extends Embeddings {
 	constructor(
 		private readonly getPool: () => Promise<oracledb.Pool>,
@@ -80,9 +86,9 @@ class PooledOracleEmbeddings extends Embeddings {
 		);
 	}
 
-	override async embedQuery(document: string): Promise<number[]> {
+	override async embedQuery(query: string): Promise<number[]> {
 		return await this.withConnection<number[]>(
-			async (embeddings) => await embeddings.embedQuery(document),
+			async (embeddings) => await embeddings.embedQuery(query),
 		);
 	}
 }
