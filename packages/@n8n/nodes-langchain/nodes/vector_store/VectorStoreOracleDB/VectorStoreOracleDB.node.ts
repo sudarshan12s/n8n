@@ -136,6 +136,8 @@ const createLazyOraclePool = (
 	credentials: OracleDBNodeCredentials,
 ) => {
 	const getPool = async () => await configureOracleDB.call(context, credentials);
+	// OracleVS expects an oracledb.Pool, but it only uses getConnection/close.
+	// We provide a lightweight wrapper that matches that subset of the interface.
 	return new LazyOraclePool(getPool) as unknown as oracledb.Pool;
 };
 
