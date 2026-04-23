@@ -432,15 +432,33 @@ describe('VectorStoreOracleDB.node', () => {
 
 	it('merges stored filter with ad-hoc filter for similarity search', async () => {
 		const node = createNode();
-		const baseFilter = { project: 'n8n' } as unknown as Record<string, never>;
-		const vectorStore = await node.getVectorStoreClient(context, baseFilter, embeddings, 0);
+		const baseFilter = {
+			$and: [{ project: 'n8n' }, { category: 'movies' }],
+			nested: { flag: true },
+		} as Record<string, unknown>;
+		const runtimeFilter = {
+			$and: [{ language: 'en' }],
+			nested: { rating: { $gte: 4.5 } },
+			author: 'Andrew Ng',
+		} as Record<string, unknown>;
 
-		const runtimeFilter = { author: 'Andrew Ng' } as unknown as Record<string, never>;
-		await vectorStore.similaritySearchVectorWithScore([0.1, 0.2], 3, runtimeFilter);
+		const vectorStore = await node.getVectorStoreClient(
+			context,
+			baseFilter as unknown as Record<string, never>,
+			embeddings,
+			0,
+		);
+
+		await vectorStore.similaritySearchVectorWithScore(
+			[0.1, 0.2],
+			3,
+			runtimeFilter as unknown as Record<string, never>,
+		);
 
 		expect(similaritySearchSpy).toHaveBeenCalledWith([0.1, 0.2], 3, {
-			...baseFilter,
-			...runtimeFilter,
+			$and: [{ project: 'n8n' }, { category: 'movies' }, { language: 'en' }],
+			nested: { flag: true, rating: { $gte: 4.5 } },
+			author: 'Andrew Ng',
 		});
 	});
 

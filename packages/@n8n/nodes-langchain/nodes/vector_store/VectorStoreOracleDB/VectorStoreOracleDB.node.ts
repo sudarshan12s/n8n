@@ -25,6 +25,42 @@ const NO_ROWS_FOUND_ERROR_MESSAGE = 'No rows found.';
 const isNoRowsFoundError = (error: unknown): error is Error =>
 	error instanceof Error && error.message === NO_ROWS_FOUND_ERROR_MESSAGE;
 
+type OracleFilter = OracleVS['FilterType'];
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+	value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Deeply merges stored node filter and ad-hoc runtime filter so both sets of predicates apply.
+ * Example:
+ *   base      → { $and: [{ project: 'n8n' }], nested: { flag: true } }
+ *   override  → { $and: [{ language: 'en' }], nested: { rating: { $gte: 4.5 } } }
+ *   result    → { $and: [{ project: 'n8n' }, { language: 'en' }],
+ *                 nested: { flag: true, rating: { $gte: 4.5 } } }
+ *
+ * Arrays (e.g. $and/$or/$in) are concatenated; plain objects merge recursively; scalars favour override.
+ */
+const mergeFilters = (base?: OracleFilter, override?: OracleFilter): OracleFilter | undefined => {
+	if (base === undefined || base === null) return override;
+	if (override === undefined || override === null) return base;
+
+	if (Array.isArray(base) && Array.isArray(override)) {
+		return [...base, ...override] as unknown as OracleFilter;
+	}
+
+	if (isPlainObject(base) && isPlainObject(override)) {
+		const result: Record<string, unknown> = { ...base };
+
+		for (const [key, overrideValue] of Object.entries(override)) {
+			result[key] = mergeFilters(base[key] as OracleFilter, overrideValue as OracleFilter);
+		}
+
+		return result as OracleFilter;
+	}
+
+	return override;
+};
+
 // eslint-disable-next-line n8n-nodes-base/node-param-default-missing
 const distanceStrategyField: INodeProperties = {
 	displayName: 'Distance Strategy',
@@ -123,7 +159,7 @@ class ExtendedOracleDBVectorStore extends OracleVS {
 		k: number,
 		filter?: OracleVS['FilterType'],
 	) {
-		const mergedFilter = { ...this.filter, ...filter };
+		const mergedFilter = mergeFilters(this.filter, filter);
 
 		try {
 			return await super.similaritySearchVectorWithScore(query, k, mergedFilter);
