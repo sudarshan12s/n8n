@@ -2,16 +2,273 @@ import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import { logWrapper } from '@n8n/ai-utilities';
 import {
 	NodeConnectionTypes,
+	NodeOperationError,
 	type IDataObject,
+	type ILoadOptionsFunctions,
+	type INodeListSearchItems,
+	type INodeListSearchResult,
+	type INodeProperties,
 	type INodeType,
 	type INodeTypeDescription,
 	type ISupplyDataFunctions,
 	type SupplyData,
 } from 'n8n-workflow';
 
-import { createOciGenAiClient, type OciGenAiCredentials } from '../../utils/ociGenAi';
+import {
+	createOciGenAiClient,
+	createOciGenAiModelClient,
+	type OciGenAiCredentials,
+} from '../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'meta.llama-3.3-70b-instruct';
+const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_MAX_TOKENS = 1024;
+const DEFAULT_TOP_P = 0.9;
+
+type ResourceLocatorValue = {
+	mode: string;
+	value: string;
+};
+
+type OciChatRequestParams = {
+	temperature?: number;
+	maxTokens?: number;
+	topP?: number;
+	topK?: number;
+	seed?: number;
+};
+
+function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+
+	if (!('mode' in value) || !('value' in value)) {
+		return false;
+	}
+
+	const candidate = value as {
+		mode?: unknown;
+		value?: unknown;
+	};
+
+	return typeof candidate.mode === 'string' && typeof candidate.value === 'string';
+}
+
+function getModelId(value: unknown): string {
+	if (isResourceLocatorValue(value)) {
+		const modelId = value.value.trim();
+
+		if (!modelId) {
+			throw new Error('Chat model is required');
+		}
+
+		return modelId;
+	}
+
+	if (typeof value === 'string') {
+		const modelId = value.trim();
+
+		if (!modelId) {
+			throw new Error('Chat model is required');
+		}
+
+		return modelId;
+	}
+
+	throw new Error('Invalid chat model value');
+}
+
+/**
+ * Small n8n-specific adapter that preserves the Oracle Generic Chat model
+ * while injecting node-level default request parameters.
+ *
+ * We intentionally subclass rather than calling .bind() in supplyData().
+ * A RunnableBinding would hide the model's bindTools() API from downstream
+ * n8n agents.
+ */
+class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
+	private readonly defaultRequestParams: OciChatRequestParams;
+
+	constructor(
+		params: ConstructorParameters<typeof OciGenAiGenericChat>[0] & {
+			defaultRequestParams?: OciChatRequestParams;
+		},
+	) {
+		super(params);
+
+		this.defaultRequestParams = params.defaultRequestParams ?? {};
+	}
+
+	override _createRequest(
+		messages: Parameters<OciGenAiGenericChat['_createRequest']>[0],
+		options: Parameters<OciGenAiGenericChat['_createRequest']>[1],
+		stream?: boolean,
+	) {
+		const requestParams = {
+			...this.defaultRequestParams,
+			...(options.requestParams ?? {}),
+		};
+
+		return super._createRequest(
+			messages,
+			{
+				...options,
+				requestParams,
+			},
+			stream,
+		);
+	}
+}
+
+const modelProperty: INodeProperties = {
+	displayName: 'Model',
+	name: 'model',
+	type: 'resourceLocator',
+	default: {
+		mode: 'list',
+		value: DEFAULT_MODEL,
+	},
+	required: true,
+	modes: [
+		{
+			displayName: 'From List',
+			name: 'list',
+			type: 'list',
+			placeholder: 'Select a chat model...',
+			typeOptions: {
+				searchListMethod: 'searchChatModels',
+				searchable: true,
+			},
+		},
+		{
+			displayName: 'ID',
+			name: 'id',
+			type: 'string',
+			placeholder: 'meta.llama-3.3-70b-instruct',
+		},
+	],
+	description:
+		'Select an OCI Generative AI chat model from the compartment or enter the model ID directly.',
+};
+
+const compartmentProperty: INodeProperties = {
+	displayName: 'Compartment OCID',
+	name: 'compartmentId',
+	type: 'string',
+	default: '',
+	required: true,
+	placeholder: 'ocid1.compartment.oc1..aaaa...',
+	description: 'OCID of the compartment authorized to use OCI Generative AI.',
+};
+
+const vendorProperty: INodeProperties = {
+	displayName: 'Vendor',
+	name: 'vendor',
+	type: 'string',
+	default: '',
+	placeholder: 'Meta, Cohere, Google, etc.',
+	description: 'Optional vendor filter used when searching the model list.',
+};
+
+const servingModeProperty: INodeProperties = {
+	displayName: 'Serving Mode',
+	name: 'servingMode',
+	type: 'options',
+	options: [
+		{
+			name: 'On Demand',
+			value: 'onDemand',
+			description: 'Use an OCI Generative AI on-demand model.',
+		},
+		{
+			name: 'Dedicated Endpoint',
+			value: 'dedicated',
+			description: 'Use a model deployed to a dedicated OCI AI endpoint.',
+		},
+	],
+	default: 'onDemand',
+};
+
+const dedicatedEndpointProperty: INodeProperties = {
+	displayName: 'Dedicated Endpoint ID',
+	name: 'dedicatedEndpointId',
+	type: 'string',
+	default: '',
+	placeholder: 'ocid1.generativeaidededicatedaiendpoint.oc1...',
+	displayOptions: {
+		show: {
+			servingMode: ['dedicated'],
+		},
+	},
+	description: 'OCID of the dedicated OCI Generative AI endpoint hosting the model.',
+};
+
+const optionsProperty: INodeProperties = {
+	displayName: 'Options',
+	name: 'options',
+	type: 'collection',
+	placeholder: 'Add Option',
+	default: {},
+	options: [
+		{
+			displayName: 'Temperature',
+			name: 'temperature',
+			type: 'number',
+			default: DEFAULT_TEMPERATURE,
+			typeOptions: {
+				minValue: 0,
+				maxValue: 2,
+				numberPrecision: 2,
+			},
+			description: 'Controls the randomness of generated responses.',
+		},
+		{
+			displayName: 'Maximum Tokens',
+			name: 'maxTokens',
+			type: 'number',
+			default: DEFAULT_MAX_TOKENS,
+			typeOptions: {
+				minValue: 1,
+			},
+			description: 'Maximum number of tokens generated in the response.',
+		},
+		{
+			displayName: 'Top P',
+			name: 'topP',
+			type: 'number',
+			default: DEFAULT_TOP_P,
+			typeOptions: {
+				minValue: 0,
+				maxValue: 1,
+				numberPrecision: 2,
+			},
+			description: 'Controls nucleus sampling.',
+		},
+		{
+			displayName: 'Top K',
+			name: 'topK',
+			type: 'number',
+			default: 0,
+			typeOptions: {
+				minValue: 0,
+			},
+			description:
+				'Number of highest-probability tokens considered for generation. Set to 0 to leave unset.',
+		},
+		{
+			displayName: 'Seed',
+			name: 'seed',
+			type: 'number',
+			default: 0,
+			typeOptions: {
+				minValue: 0,
+			},
+			description:
+				'Optional seed for deterministic generation where supported by the selected model.',
+		},
+	],
+};
 
 export class LmChatOciGenAi implements INodeType {
 	description: INodeTypeDescription = {
@@ -21,11 +278,9 @@ export class LmChatOciGenAi implements INodeType {
 		group: ['transform'],
 		version: 1,
 		description: 'Use OCI Generative AI chat models with n8n AI chains and agents',
-
 		defaults: {
 			name: 'OCI Generative AI Chat Model',
 		},
-
 		codex: {
 			categories: ['AI'],
 			subcategories: {
@@ -40,135 +295,115 @@ export class LmChatOciGenAi implements INodeType {
 				],
 			},
 		},
-
 		credentials: [
 			{
 				name: 'ociGenAiApi',
 				required: true,
 			},
 		],
-
 		inputs: [],
-
 		outputs: [NodeConnectionTypes.AiLanguageModel],
-
 		outputNames: ['Model'],
-
 		properties: [
-			{
-				displayName: 'Model',
-				name: 'model',
-				type: 'string',
-				default: DEFAULT_MODEL,
-				required: true,
-				placeholder: 'meta.llama-3.3-70b-instruct',
-				description: 'OCI Generative AI model ID',
-			},
-			{
-				displayName: 'Compartment OCID',
-				name: 'compartmentId',
-				type: 'string',
-				default: '',
-				required: true,
-				placeholder: 'ocid1.compartment.oc1..aaaa...',
-				description: 'OCID of the compartment used for the OCI Generative AI request',
-			},
-			{
-				displayName: 'Serving Mode',
-				name: 'servingMode',
-				type: 'options',
-				options: [
-					{
-						name: 'On Demand',
-						value: 'onDemand',
-					},
-					{
-						name: 'Dedicated Endpoint',
-						value: 'dedicated',
-					},
-				],
-				default: 'onDemand',
-			},
-			{
-				displayName: 'Dedicated Endpoint ID',
-				name: 'dedicatedEndpointId',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						servingMode: ['dedicated'],
-					},
-				},
-				placeholder: 'ocid1.generativeaidededicatedaiendpoint.oc1...',
-				description: 'OCID of the OCI dedicated AI endpoint',
-			},
-			{
-				displayName: 'Options',
-				name: 'options',
-				type: 'collection',
-				placeholder: 'Add Option',
-				default: {},
-				options: [
-					{
-						displayName: 'Temperature',
-						name: 'temperature',
-						type: 'number',
-						default: 0.7,
-						typeOptions: {
-							minValue: 0,
-							maxValue: 2,
-							numberPrecision: 2,
-						},
-					},
-					{
-						displayName: 'Maximum Tokens',
-						name: 'maxTokens',
-						type: 'number',
-						default: 1024,
-						typeOptions: {
-							minValue: 1,
-						},
-					},
-					{
-						displayName: 'Top P',
-						name: 'topP',
-						type: 'number',
-						default: 0.9,
-						typeOptions: {
-							minValue: 0,
-							maxValue: 1,
-							numberPrecision: 2,
-						},
-					},
-					{
-						displayName: 'Top K',
-						name: 'topK',
-						type: 'number',
-						default: 0,
-						typeOptions: {
-							minValue: 0,
-						},
-					},
-					{
-						displayName: 'Seed',
-						name: 'seed',
-						type: 'number',
-						default: 0,
-						typeOptions: {
-							minValue: 0,
-						},
-					},
-				],
-			},
+			modelProperty,
+			compartmentProperty,
+			vendorProperty,
+			servingModeProperty,
+			dedicatedEndpointProperty,
+			optionsProperty,
 		],
+	};
+
+	methods = {
+		listSearch: {
+			async searchChatModels(
+				this: ILoadOptionsFunctions,
+				filter?: string,
+				paginationToken?: string,
+			): Promise<INodeListSearchResult> {
+				const compartmentId = this.getNodeParameter('compartmentId', '') as string;
+
+				if (!compartmentId.trim()) {
+					throw new NodeOperationError(
+						this.getNode(),
+						'Enter a Compartment OCID before searching for models.',
+					);
+				}
+
+				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+
+				const client = await createOciGenAiModelClient(credentials);
+
+				const vendor = this.getNodeParameter('vendor', '') as string;
+
+				const response = await client.listModels({
+					compartmentId: compartmentId.trim(),
+
+					/*
+					 * OCI's model catalog supports
+					 * server-side CHAT capability filtering.
+					 */
+					capability: ['CHAT'],
+
+					...(vendor.trim()
+						? {
+								vendor: vendor.trim(),
+							}
+						: {}),
+
+					limit: 100,
+
+					...(paginationToken
+						? {
+								page: paginationToken,
+							}
+						: {}),
+				});
+
+				const normalizedFilter = (filter ?? '').trim().toLowerCase();
+
+				const results: INodeListSearchItems[] = (response.items ?? [])
+					.filter((model) => {
+						if (!normalizedFilter) {
+							return true;
+						}
+
+						const name = model.displayName ?? '';
+
+						const id = model.id ?? '';
+
+						return (
+							name.toLowerCase().includes(normalizedFilter) ||
+							id.toLowerCase().includes(normalizedFilter)
+						);
+					})
+					.map((model) => ({
+						name: model.displayName ?? model.id ?? 'OCI Chat Model',
+						value: model.id ?? '',
+					}))
+					.filter((model) => model.value.length > 0)
+					.sort((a, b) => a.name.localeCompare(b.name));
+
+				return {
+					results,
+					paginationToken: response.opcNextPage,
+				};
+			},
+		},
 	};
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
 
-		const model = this.getNodeParameter('model', itemIndex) as string;
+		const modelParameter = this.getNodeParameter('model', itemIndex);
+
+		const model = getModelId(modelParameter);
 
 		const compartmentId = this.getNodeParameter('compartmentId', itemIndex) as string;
+
+		if (!compartmentId.trim()) {
+			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.');
+		}
 
 		const servingMode = this.getNodeParameter('servingMode', itemIndex, 'onDemand') as
 			| 'onDemand'
@@ -180,65 +415,54 @@ export class LmChatOciGenAi implements INodeType {
 			'',
 		) as string;
 
+		if (servingMode === 'dedicated' && !dedicatedEndpointId.trim()) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
+			);
+		}
+
 		const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
+
+		const temperature =
+			typeof options.temperature === 'number' ? options.temperature : DEFAULT_TEMPERATURE;
+
+		const maxTokens =
+			typeof options.maxTokens === 'number' ? options.maxTokens : DEFAULT_MAX_TOKENS;
+
+		const topP = typeof options.topP === 'number' ? options.topP : DEFAULT_TOP_P;
+
+		const topK = typeof options.topK === 'number' && options.topK > 0 ? options.topK : undefined;
+
+		const seed = typeof options.seed === 'number' && options.seed > 0 ? options.seed : undefined;
 
 		const client = await createOciGenAiClient(credentials);
 
-		const modelInstance = new OciGenAiGenericChat({
+		const defaultRequestParams: OciChatRequestParams = {
+			temperature,
+			maxTokens,
+			topP,
+			...(topK !== undefined ? { topK } : {}),
+			...(seed !== undefined ? { seed } : {}),
+		};
+
+		const modelParams = {
 			client,
-
 			compartmentId: compartmentId.trim(),
-
-			...(servingMode === 'dedicated'
+			defaultRequestParams,
+			...(servingMode === 'onDemand'
 				? {
-						dedicatedEndpointId: dedicatedEndpointId.trim(),
+						onDemandModelId: model,
 					}
 				: {
-						onDemandModelId: model.trim(),
+						dedicatedEndpointId: dedicatedEndpointId.trim(),
 					}),
-		});
+		};
 
-		/*
-		 * Provider-specific generation parameters belong in
-		 * requestParams. OciGenAiGenericChat maps these into
-		 * OCI's GenericChatRequest.
-		 */
-		const boundModel = modelInstance.bind({
-			requestParams: {
-				...(typeof options.temperature === 'number'
-					? {
-							temperature: options.temperature,
-						}
-					: {}),
-
-				...(typeof options.maxTokens === 'number'
-					? {
-							maxTokens: options.maxTokens,
-						}
-					: {}),
-
-				...(typeof options.topP === 'number'
-					? {
-							topP: options.topP,
-						}
-					: {}),
-
-				...(typeof options.topK === 'number' && options.topK > 0
-					? {
-							topK: options.topK,
-						}
-					: {}),
-
-				...(typeof options.seed === 'number'
-					? {
-							seed: options.seed,
-						}
-					: {}),
-			},
-		});
+		const chatModel = new N8nOciGenAiGenericChat(modelParams);
 
 		return {
-			response: logWrapper(boundModel, this),
+			response: logWrapper(chatModel, this),
 		};
 	}
 }
