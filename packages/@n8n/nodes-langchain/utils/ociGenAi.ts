@@ -1,8 +1,9 @@
+import { UserError, type ICredentialDataDecryptedObject } from 'n8n-workflow';
 import * as common from 'oci-common';
 import * as genai from 'oci-generativeai';
-import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
+import * as genaiInference from 'oci-generativeaiinference';
 
-export interface OciGenAiCredentials extends ICredentialDataDecryptedObject {
+export interface OciGenAiCredentials {
 	authentication: 'apiKey' | 'instancePrincipal' | 'resourcePrincipal' | 'session';
 	tenancyId?: string;
 	userId?: string;
@@ -15,10 +16,22 @@ export interface OciGenAiCredentials extends ICredentialDataDecryptedObject {
 	serviceEndpoint?: string;
 }
 
+export function isOciGenAiCredentials(
+	credentials: ICredentialDataDecryptedObject,
+): credentials is ICredentialDataDecryptedObject & OciGenAiCredentials {
+	return (
+		(credentials.authentication === 'apiKey' ||
+			credentials.authentication === 'instancePrincipal' ||
+			credentials.authentication === 'resourcePrincipal' ||
+			credentials.authentication === 'session') &&
+		typeof credentials.regionId === 'string'
+	);
+}
+
 function required(credentials: OciGenAiCredentials, name: keyof OciGenAiCredentials): string {
 	const value = credentials[name];
 	if (typeof value !== 'string' || value.trim() === '') {
-		throw new Error(`OCI Generative AI credential "${name}" is required`);
+		throw new UserError(`OCI Generative AI credential "${name}" is required`);
 	}
 	return value.trim();
 }
@@ -49,14 +62,14 @@ async function getAuthenticationDetailsProvider(
 		case 'instancePrincipal':
 			return await new common.InstancePrincipalsAuthenticationDetailsProviderBuilder().build();
 		case 'resourcePrincipal':
-			return await common.ResourcePrincipalAuthenticationDetailsProvider.builder();
+			return common.ResourcePrincipalAuthenticationDetailsProvider.builder();
 		case 'session':
 			return new common.ConfigFileAuthenticationDetailsProvider(
 				required(credentials, 'configFilePath'),
 				required(credentials, 'configProfile'),
 			);
 		default:
-			throw new Error(
+			throw new UserError(
 				`Unsupported OCI authentication method: ${String(credentials.authentication)}`,
 			);
 	}
@@ -64,9 +77,9 @@ async function getAuthenticationDetailsProvider(
 
 export async function createOciGenAiClient(
 	credentials: OciGenAiCredentials,
-): Promise<genai.GenerativeAiInferenceClient> {
+): Promise<genaiInference.GenerativeAiInferenceClient> {
 	const authenticationDetailsProvider = await getAuthenticationDetailsProvider(credentials);
-	const client = new genai.GenerativeAiInferenceClient({ authenticationDetailsProvider });
+	const client = new genaiInference.GenerativeAiInferenceClient({ authenticationDetailsProvider });
 
 	if (credentials.regionId) {
 		client.region = common.Region.fromRegionId(credentials.regionId.trim());
@@ -92,13 +105,4 @@ export async function createOciGenAiModelClient(
 	}
 
 	return client;
-}
-
-export async function testOciGenAiConnection(credentials: OciGenAiCredentials): Promise<void> {
-	const client = await createOciGenAiModelClient(credentials);
-	// For apiKey auth, tenancyId is the root compartment OCID
-	const testCompartment = credentials.tenancyId?.trim();
-	if (testCompartment) {
-		await client.listModels({ compartmentId: testCompartment, limit: 1 });
-	}
 }

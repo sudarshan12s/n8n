@@ -1,10 +1,13 @@
 import type {
-	ICredentialTestFunction,
+	IAllExecuteFunctions,
+	ICredentialDataDecryptedObject,
+	ICredentialsDecrypted,
 	ICredentialType,
 	INodeCredentialTestResult,
 	INodeProperties,
 } from 'n8n-workflow';
-import { testOciGenAiConnection, type OciGenAiCredentials } from '../utils/ociGenAi';
+import * as common from 'oci-common';
+import * as genai from 'oci-generativeai';
 
 export class OracleCloudGenAiApi implements ICredentialType {
 	name = 'ociGenAiApi';
@@ -143,20 +146,74 @@ export class OracleCloudGenAiApi implements ICredentialType {
 		},
 	];
 
-	test: ICredentialTestFunction = async (credentialData): Promise<INodeCredentialTestResult> => {
-		try {
-			const data = credentialData.data as unknown as OciGenAiCredentials;
-			await testOciGenAiConnection(data);
+	// Custom credential test methods mapping
+	credentialTest = {
+		async testConnection(
+			this: IAllExecuteFunctions,
+			credentialData: ICredentialsDecrypted<ICredentialDataDecryptedObject>,
+		): Promise<INodeCredentialTestResult> {
+			try {
+				const data = (credentialData.data ?? credentialData) as Record<string, string>;
+				const authMethod = data.authentication;
+				const regionId = data.regionId?.trim();
 
-			return {
-				status: 'OK',
-				message: 'Connection successful',
-			};
-		} catch (error) {
-			return {
-				status: 'Error',
-				message: (error as Error).message || 'Connection failed',
-			};
-		}
+				let authProvider: common.AuthenticationDetailsProvider;
+
+				if (authMethod === 'apiKey') {
+					let privateKey = data.privateKey?.trim() ?? '';
+					if (privateKey.includes('\\n')) {
+						privateKey = privateKey.replace(/\\n/g, '\n');
+					}
+
+					authProvider = new common.SimpleAuthenticationDetailsProvider(
+						data.tenancyId?.trim(),
+						data.userId?.trim(),
+						data.fingerprint?.trim(),
+						privateKey,
+						data.passphrase?.trim() || null,
+						common.Region.fromRegionId(regionId),
+					);
+				} else if (authMethod === 'instancePrincipal') {
+					authProvider =
+						await new common.InstancePrincipalsAuthenticationDetailsProviderBuilder().build();
+				} else if (authMethod === 'resourcePrincipal') {
+					authProvider = common.ResourcePrincipalAuthenticationDetailsProvider.builder();
+				} else if (authMethod === 'session') {
+					authProvider = new common.ConfigFileAuthenticationDetailsProvider(
+						data.configFilePath?.trim(),
+						data.configProfile?.trim(),
+					);
+				} else {
+					throw new Error(`Unsupported authentication method: ${authMethod}`);
+				}
+
+				const client = new genai.GenerativeAiClient({
+					authenticationDetailsProvider: authProvider,
+				});
+
+				if (regionId) {
+					client.region = common.Region.fromRegionId(regionId);
+				}
+
+				if (data.serviceEndpoint?.trim()) {
+					client.endpoint = data.serviceEndpoint.trim();
+				}
+
+				const compartmentId = data.tenancyId?.trim();
+				if (compartmentId) {
+					await client.listModels({ compartmentId, limit: 1 });
+				}
+
+				return {
+					status: 'OK',
+					message: 'Connection successful',
+				};
+			} catch (error) {
+				return {
+					status: 'Error',
+					message: (error as Error).message || 'Connection failed',
+				};
+			}
+		},
 	};
 }

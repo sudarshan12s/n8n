@@ -1,24 +1,22 @@
-import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import { logWrapper } from '@n8n/ai-utilities';
+import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
+import { models as ociModels } from 'oci-generativeaiinference';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
-	type IDataObject,
 	type ILoadOptionsFunctions,
 	type INodeListSearchItems,
 	type INodeListSearchResult,
 	type INodeProperties,
+	type INode,
 	type INodeType,
 	type INodeTypeDescription,
 	type ISupplyDataFunctions,
 	type SupplyData,
 } from 'n8n-workflow';
 
-import {
-	createOciGenAiModelClient,
-	createOciGenAiClient,
-	type OciGenAiCredentials,
-} from '../../utils/ociGenAi';
+import type { OciGenAiCredentials } from '../../../utils/ociGenAi';
+import { createOciGenAiModelClient, createOciGenAiClient } from '../../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'cohere.embed-v4.0';
 const DEFAULT_BATCH_SIZE = 96;
@@ -38,11 +36,11 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 	return typeof candidate.mode === 'string' && typeof candidate.value === 'string';
 }
 
-function getModelId(value: unknown): string {
+function getModelId(node: INode, value: unknown, itemIndex?: number): string {
 	if (isResourceLocatorValue(value)) {
 		const modelId = value.value.trim();
 		if (!modelId) {
-			throw new Error('Embedding model is required');
+			throw new NodeOperationError(node, 'Model is required', { itemIndex });
 		}
 		return modelId;
 	}
@@ -50,14 +48,26 @@ function getModelId(value: unknown): string {
 	if (typeof value === 'string') {
 		const modelId = value.trim();
 		if (!modelId) {
-			throw new Error('Embedding model is required');
+			throw new NodeOperationError(node, 'Model is required', { itemIndex });
 		}
 		return modelId;
 	}
 
-	throw new Error('Invalid embedding model value');
+	throw new NodeOperationError(node, 'Invalid model value provided', { itemIndex });
 }
 
+function getTruncate(value: unknown): ociModels.EmbedTextDetails.Truncate | undefined {
+	switch (value) {
+		case 'NONE':
+			return ociModels.EmbedTextDetails.Truncate.None;
+		case 'START':
+			return ociModels.EmbedTextDetails.Truncate.Start;
+		case 'END':
+			return ociModels.EmbedTextDetails.Truncate.End;
+		default:
+			return undefined;
+	}
+}
 const modelProperty: INodeProperties = {
 	displayName: 'Model',
 	name: 'model',
@@ -96,7 +106,7 @@ const compartmentProperty: INodeProperties = {
 	default: '',
 	required: true,
 	placeholder: 'ocid1.compartment.oc1..aaaa...',
-	description: 'OCID of the compartment authorized to use OCI Generative AI.',
+	description: 'OCID of the compartment authorized to use OCI Generative AI',
 };
 
 const servingModeProperty: INodeProperties = {
@@ -107,12 +117,12 @@ const servingModeProperty: INodeProperties = {
 		{
 			name: 'On Demand',
 			value: 'onDemand',
-			description: 'Use an on-demand OCI Generative AI model.',
+			description: 'Use an on-demand OCI Generative AI model',
 		},
 		{
 			name: 'Dedicated Endpoint',
 			value: 'dedicated',
-			description: 'Use a model deployed to an OCI Generative AI dedicated endpoint.',
+			description: 'Use a model deployed to an OCI Generative AI dedicated endpoint',
 		},
 	],
 	default: 'onDemand',
@@ -129,7 +139,7 @@ const dedicatedEndpointProperty: INodeProperties = {
 			servingMode: ['dedicated'],
 		},
 	},
-	description: 'OCID of the dedicated AI endpoint hosting the embedding model.',
+	description: 'OCID of the dedicated AI endpoint hosting the embedding model',
 };
 
 const optionsProperty: INodeProperties = {
@@ -148,7 +158,7 @@ const optionsProperty: INodeProperties = {
 				minValue: 1,
 				maxValue: 96,
 			},
-			description: 'Maximum number of texts included in one OCI embedding request.',
+			description: 'Maximum number of texts included in one OCI embedding request',
 		},
 		{
 			displayName: 'Maximum Concurrency',
@@ -158,7 +168,7 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 1,
 			},
-			description: 'Maximum number of embedding requests that can run concurrently.',
+			description: 'Maximum number of embedding requests that can run concurrently',
 		},
 		{
 			displayName: 'Output Dimensions',
@@ -168,7 +178,7 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 1,
 			},
-			description: 'Optional output-vector dimension supported by compatible embedding models.',
+			description: 'Optional output-vector dimension supported by compatible embedding models',
 		},
 		{
 			displayName: 'Truncate',
@@ -189,7 +199,7 @@ const optionsProperty: INodeProperties = {
 				},
 			],
 			default: 'START',
-			description: 'How OCI should handle input that exceeds the model token limit.',
+			description: 'How OCI should handle input that exceeds the model token limit',
 		},
 	],
 };
@@ -249,14 +259,16 @@ export class EmbeddingsOciGenAi implements INodeType {
 					return {
 						results: [
 							{
-								name: 'Enter a Compartment OCID to load models',
+								name: 'Enter a Compartment OCID to Load Models',
 								value: '',
 							},
 						],
 					};
 				}
 
-				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+				const credentials = (await this.getCredentials(
+					'ociGenAiApi',
+				)) as unknown as OciGenAiCredentials;
 				const client = await createOciGenAiModelClient(credentials);
 
 				const response = await client.listModels({
@@ -267,7 +279,9 @@ export class EmbeddingsOciGenAi implements INodeType {
 
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
 
-				const results = (response.items ?? [])
+				const items = response.modelCollection?.items ?? [];
+
+				const results = items
 					.filter((model) => {
 						const capabilities = model.capabilities ?? [];
 						const isEmbeddingModel =
@@ -301,12 +315,14 @@ export class EmbeddingsOciGenAi implements INodeType {
 	};
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
-		const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+		const credentials = (await this.getCredentials(
+			'ociGenAiApi',
+		)) as unknown as OciGenAiCredentials;
 
 		let model: string;
 		try {
 			const modelParameter = this.getNodeParameter('model', itemIndex);
-			model = getModelId(modelParameter);
+			model = getModelId(this.getNode(), modelParameter, itemIndex);
 		} catch (error) {
 			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 		}
@@ -333,7 +349,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 			);
 		}
 
-		const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
+		const options = this.getNodeParameter('options', itemIndex, {});
 
 		const batchSize = (options.batchSize as number) ?? DEFAULT_BATCH_SIZE;
 		const maxConcurrency = (options.maxConcurrency as number) ?? DEFAULT_MAX_CONCURRENCY;
@@ -359,7 +375,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 				? options.outputDimensions
 				: undefined;
 
-		const truncate = typeof options.truncate === 'string' ? options.truncate : undefined;
+		const truncate = getTruncate(options.truncate);
 
 		const client = await createOciGenAiClient(credentials);
 
@@ -369,7 +385,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 			batchSize,
 			maxConcurrency,
 			...(outputDimensions !== undefined ? { outputDimensions } : {}),
-			...(truncate ? { truncate: truncate as 'NONE' | 'START' | 'END' } : {}),
+			...(truncate !== undefined ? { truncate } : {}),
 			...(servingMode === 'dedicated' ? { dedicatedEndpointId } : { onDemandModelId: model }),
 		});
 

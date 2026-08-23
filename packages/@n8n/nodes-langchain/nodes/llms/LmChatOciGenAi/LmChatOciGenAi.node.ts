@@ -1,9 +1,8 @@
 import { OciGenAiGenericChat } from '@oracle/langchain-oci';
-import { logWrapper } from '@n8n/ai-utilities';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
-	type IDataObject,
+	UserError,
 	type ILoadOptionsFunctions,
 	type INodeListSearchItems,
 	type INodeListSearchResult,
@@ -13,12 +12,13 @@ import {
 	type ISupplyDataFunctions,
 	type SupplyData,
 } from 'n8n-workflow';
+import { models as ociModels } from 'oci-generativeai';
 
 import {
 	createOciGenAiClient,
 	createOciGenAiModelClient,
-	type OciGenAiCredentials,
-} from '../../utils/ociGenAi';
+	isOciGenAiCredentials,
+} from '../../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'meta.llama-3.3-70b-instruct';
 const DEFAULT_TEMPERATURE = 0.7;
@@ -49,15 +49,15 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 function getModelId(value: unknown): string {
 	if (isResourceLocatorValue(value)) {
 		const modelId = value.value.trim();
-		if (!modelId) throw new Error('Chat model is required');
+		if (!modelId) throw new UserError('Chat model is required');
 		return modelId;
 	}
 	if (typeof value === 'string') {
 		const modelId = value.trim();
-		if (!modelId) throw new Error('Chat model is required');
+		if (!modelId) throw new UserError('Chat model is required');
 		return modelId;
 	}
-	throw new Error('Invalid chat model value');
+	throw new UserError('Invalid chat model value');
 }
 
 class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
@@ -114,7 +114,7 @@ const modelProperty: INodeProperties = {
 		},
 	],
 	description:
-		'Select an OCI Generative AI chat model from the compartment or enter the model ID directly.',
+		'Select an OCI Generative AI chat model from the compartment or enter the model ID directly',
 };
 
 const compartmentProperty: INodeProperties = {
@@ -124,7 +124,7 @@ const compartmentProperty: INodeProperties = {
 	default: '',
 	required: true,
 	placeholder: 'ocid1.compartment.oc1..aaaa...',
-	description: 'OCID of the compartment authorized to use OCI Generative AI.',
+	description: 'OCID of the compartment authorized to use OCI Generative AI',
 };
 
 const vendorProperty: INodeProperties = {
@@ -133,7 +133,7 @@ const vendorProperty: INodeProperties = {
 	type: 'string',
 	default: '',
 	placeholder: 'Meta, Cohere, Google, etc.',
-	description: 'Optional vendor filter used when searching the model list.',
+	description: 'Optional vendor filter used when searching the model list',
 };
 
 const servingModeProperty: INodeProperties = {
@@ -144,12 +144,12 @@ const servingModeProperty: INodeProperties = {
 		{
 			name: 'On Demand',
 			value: 'onDemand',
-			description: 'Use an OCI Generative AI on-demand model.',
+			description: 'Use an OCI Generative AI on-demand model',
 		},
 		{
 			name: 'Dedicated Endpoint',
 			value: 'dedicated',
-			description: 'Use a model deployed to a dedicated OCI AI endpoint.',
+			description: 'Use a model deployed to a dedicated OCI AI endpoint',
 		},
 	],
 	default: 'onDemand',
@@ -166,7 +166,7 @@ const dedicatedEndpointProperty: INodeProperties = {
 			servingMode: ['dedicated'],
 		},
 	},
-	description: 'OCID of the dedicated OCI Generative AI endpoint hosting the model.',
+	description: 'OCID of the dedicated OCI Generative AI endpoint hosting the model',
 };
 
 const optionsProperty: INodeProperties = {
@@ -186,7 +186,7 @@ const optionsProperty: INodeProperties = {
 				maxValue: 2,
 				numberPrecision: 2,
 			},
-			description: 'Controls the randomness of generated responses.',
+			description: 'Controls the randomness of generated responses',
 		},
 		{
 			displayName: 'Maximum Tokens',
@@ -196,7 +196,7 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 1,
 			},
-			description: 'Maximum number of tokens generated in the response.',
+			description: 'Maximum number of tokens generated in the response',
 		},
 		{
 			displayName: 'Top P',
@@ -208,7 +208,7 @@ const optionsProperty: INodeProperties = {
 				maxValue: 1,
 				numberPrecision: 2,
 			},
-			description: 'Controls nucleus sampling.',
+			description: 'Controls nucleus sampling',
 		},
 		{
 			displayName: 'Top K',
@@ -230,7 +230,7 @@ const optionsProperty: INodeProperties = {
 				minValue: 0,
 			},
 			description:
-				'Optional seed for deterministic generation where supported by the selected model.',
+				'Optional seed for deterministic generation where supported by the selected model',
 		},
 	],
 };
@@ -292,20 +292,23 @@ export class LmChatOciGenAi implements INodeType {
 					return {
 						results: [
 							{
-								name: 'Enter a Compartment OCID to load models',
+								name: 'Enter a Compartment OCID to Load Models',
 								value: '',
 							},
 						],
 					};
 				}
 
-				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+				const credentials = await this.getCredentials('ociGenAiApi');
+				if (!isOciGenAiCredentials(credentials)) {
+					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
+				}
 				const client = await createOciGenAiModelClient(credentials);
 				const vendor = (this.getNodeParameter('vendor', '') as string).trim();
 
 				const response = await client.listModels({
 					compartmentId,
-					capability: ['CHAT'],
+					capability: [ociModels.ModelCapability.Chat],
 					...(vendor ? { vendor } : {}),
 					limit: 100,
 					...(paginationToken ? { page: paginationToken } : {}),
@@ -313,7 +316,7 @@ export class LmChatOciGenAi implements INodeType {
 
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
 
-				const results: INodeListSearchItems[] = (response.items ?? [])
+				const results: INodeListSearchItems[] = (response.modelCollection.items ?? [])
 					.filter((model) => {
 						if (!normalizedFilter) return true;
 						const name = model.displayName ?? '';
@@ -339,7 +342,12 @@ export class LmChatOciGenAi implements INodeType {
 	};
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
-		const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+		const credentials = await this.getCredentials('ociGenAiApi');
+		if (!isOciGenAiCredentials(credentials)) {
+			throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials', {
+				itemIndex,
+			});
+		}
 
 		let model: string;
 		try {
@@ -371,7 +379,7 @@ export class LmChatOciGenAi implements INodeType {
 			);
 		}
 
-		const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
+		const options = this.getNodeParameter('options', itemIndex, {});
 
 		const temperature =
 			typeof options.temperature === 'number' ? options.temperature : DEFAULT_TEMPERATURE;
@@ -405,7 +413,7 @@ export class LmChatOciGenAi implements INodeType {
 		const chatModel = new N8nOciGenAiGenericChat(modelParams);
 
 		return {
-			response: logWrapper(chatModel, this),
+			response: chatModel,
 		};
 	}
 }
