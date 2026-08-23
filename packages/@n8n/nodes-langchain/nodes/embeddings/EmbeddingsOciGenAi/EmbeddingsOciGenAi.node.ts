@@ -15,12 +15,45 @@ import {
 	type SupplyData,
 } from 'n8n-workflow';
 
-import type { OciGenAiCredentials } from '../../../utils/ociGenAi';
-import { createOciGenAiModelClient, createOciGenAiClient } from '../../../utils/ociGenAi';
+import { createOciGenAiClient, isOciGenAiCredentials } from '../../../utils/ociGenAi';
 
-const DEFAULT_MODEL = 'cohere.embed-v4.0';
 const DEFAULT_BATCH_SIZE = 96;
 const DEFAULT_MAX_CONCURRENCY = 2;
+
+type OnDemandEmbeddingModel = {
+	displayName: string;
+	modelId: string;
+	regions: string[];
+};
+
+// Inference requires provider model IDs; ListModels returns management resource IDs.
+const ON_DEMAND_EMBEDDING_MODELS: OnDemandEmbeddingModel[] = [
+	{
+		displayName: 'Cohere Embed 4',
+		modelId: 'cohere.embed-v4.0',
+		regions: ['us-ashburn-1', 'us-chicago-1', 'me-abudhabi-1', 'me-riyadh-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed English 3',
+		modelId: 'cohere.embed-english-v3.0',
+		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed English Light 3',
+		modelId: 'cohere.embed-english-light-v3.0',
+		regions: ['us-chicago-1'],
+	},
+	{
+		displayName: 'Cohere Embed Multilingual 3',
+		modelId: 'cohere.embed-multilingual-v3.0',
+		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed Multilingual Light 3',
+		modelId: 'cohere.embed-multilingual-light-v3.0',
+		regions: ['us-chicago-1'],
+	},
+];
 
 type ResourceLocatorValue = {
 	mode: string;
@@ -74,9 +107,14 @@ const modelProperty: INodeProperties = {
 	type: 'resourceLocator',
 	default: {
 		mode: 'list',
-		value: DEFAULT_MODEL,
+		value: '',
 	},
 	required: true,
+	displayOptions: {
+		show: {
+			servingMode: ['onDemand'],
+		},
+	},
 	modes: [
 		{
 			displayName: 'From List',
@@ -95,8 +133,7 @@ const modelProperty: INodeProperties = {
 			placeholder: 'cohere.embed-v4.0',
 		},
 	],
-	description:
-		'The OCI Generative AI embedding model. Choose a model from the list or specify a model ID directly.',
+	description: 'The on-demand OCI Generative AI embedding model',
 };
 
 const compartmentProperty: INodeProperties = {
@@ -251,80 +288,48 @@ export class EmbeddingsOciGenAi implements INodeType {
 			async searchEmbeddingModels(
 				this: ILoadOptionsFunctions,
 				filter?: string,
-				paginationToken?: string,
 			): Promise<INodeListSearchResult> {
-				const compartmentId = (this.getNodeParameter('compartmentId', '') as string).trim();
-
-				if (!compartmentId) {
-					return {
-						results: [
-							{
-								name: 'Enter a Compartment OCID to Load Models',
-								value: '',
-							},
-						],
-					};
+				const credentials = await this.getCredentials('ociGenAiApi');
+				if (!isOciGenAiCredentials(credentials)) {
+					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
 				}
 
-				const credentials = (await this.getCredentials(
-					'ociGenAiApi',
-				)) as unknown as OciGenAiCredentials;
-				const client = await createOciGenAiModelClient(credentials);
-
-				const response = await client.listModels({
-					compartmentId,
-					limit: 100,
-					...(paginationToken ? { page: paginationToken } : {}),
-				});
-
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
-
-				const items = response.modelCollection?.items ?? [];
-
-				const results = items
-					.filter((model) => {
-						const capabilities = model.capabilities ?? [];
-						const isEmbeddingModel =
-							capabilities.some((cap) => String(cap).toLowerCase().includes('embed')) ||
-							model.id?.toLowerCase().includes('embed') ||
-							model.displayName?.toLowerCase().includes('embed');
-
-						if (!isEmbeddingModel) return false;
-						if (!normalizedFilter) return true;
-
-						return (
-							model.id?.toLowerCase().includes(normalizedFilter) ||
-							model.displayName?.toLowerCase().includes(normalizedFilter)
-						);
-					})
-					.map(
-						(model): INodeListSearchItems => ({
-							name: model.displayName ?? model.id ?? 'OCI Embedding Model',
-							value: model.id ?? '',
-						}),
-					)
-					.filter((model) => model.value !== '')
-					.sort((a, b) => a.name.localeCompare(b.name));
+				const regionId = credentials.regionId.trim().toLowerCase();
+				const results = ON_DEMAND_EMBEDDING_MODELS.filter(
+					(model) =>
+						model.regions.includes(regionId) &&
+						(!normalizedFilter ||
+							model.displayName.toLowerCase().includes(normalizedFilter) ||
+							model.modelId.includes(normalizedFilter)),
+				).map(
+					(model): INodeListSearchItems => ({
+						name: model.displayName,
+						value: model.modelId,
+					}),
+				);
 
 				return {
-					results,
-					paginationToken: response.opcNextPage,
+					results:
+						results.length > 0
+							? results
+							: [
+									{
+										name: 'No On-Demand Embedding Models Available in This Region',
+										value: '',
+									},
+								],
 				};
 			},
 		},
 	};
 
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
-		const credentials = (await this.getCredentials(
-			'ociGenAiApi',
-		)) as unknown as OciGenAiCredentials;
-
-		let model: string;
-		try {
-			const modelParameter = this.getNodeParameter('model', itemIndex);
-			model = getModelId(this.getNode(), modelParameter, itemIndex);
-		} catch (error) {
-			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+		const credentials = await this.getCredentials('ociGenAiApi');
+		if (!isOciGenAiCredentials(credentials)) {
+			throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials', {
+				itemIndex,
+			});
 		}
 
 		const compartmentId = (this.getNodeParameter('compartmentId', itemIndex, '') as string).trim();
@@ -348,6 +353,11 @@ export class EmbeddingsOciGenAi implements INodeType {
 				{ itemIndex },
 			);
 		}
+
+		const model =
+			servingMode === 'onDemand'
+				? getModelId(this.getNode(), this.getNodeParameter('model', itemIndex), itemIndex)
+				: undefined;
 
 		const options = this.getNodeParameter('options', itemIndex, {});
 

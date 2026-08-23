@@ -13,6 +13,7 @@ import {
 	type SupplyData,
 } from 'n8n-workflow';
 import { models as ociModels } from 'oci-generativeai';
+import type { models as ociInferenceModels } from 'oci-generativeaiinference';
 
 import {
 	createOciGenAiClient,
@@ -60,6 +61,66 @@ function getModelId(value: unknown): string {
 	throw new UserError('Invalid chat model value');
 }
 
+type OciModelListItem = {
+	id: string;
+	vendor?: string;
+	displayName?: string;
+};
+
+function getOnDemandModelId(model: OciModelListItem): string {
+	if (!model.id.startsWith('ocid1.generativeaimodel.')) {
+		return model.id;
+	}
+
+	const vendor = model.vendor?.trim();
+	const displayName = model.displayName?.trim();
+	if (!vendor || !displayName) {
+		return '';
+	}
+
+	const modelName = (
+		displayName.toLowerCase().startsWith(vendor.toLowerCase())
+			? displayName.slice(vendor.length).trim()
+			: displayName
+	).replace(/^[^a-z0-9]+/i, '');
+
+	return `${vendor}.${modelName}`
+		.toLowerCase()
+		.replace(/\s+/g, '-')
+		.replace(/[^a-z0-9.+-]/g, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function removeUnsupportedJsonSchemaKeywords(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(removeUnsupportedJsonSchemaKeywords);
+	}
+
+	if (!isRecord(value)) {
+		return value;
+	}
+
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(([key]) => key !== '$schema')
+			.map(([key, nestedValue]) => [key, removeUnsupportedJsonSchemaKeywords(nestedValue)]),
+	);
+}
+
+function sanitizeToolDefinitions(
+	tools: ociInferenceModels.FunctionDefinition[] | undefined,
+): ociInferenceModels.FunctionDefinition[] | undefined {
+	return tools?.map((tool) => ({
+		...tool,
+		...(tool.parameters === undefined
+			? {}
+			: { parameters: removeUnsupportedJsonSchemaKeywords(tool.parameters) }),
+	}));
+}
+
 /**
  * Keep this as a chat-model subclass rather than returning model.bind(...).
  *
@@ -93,8 +154,19 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 			...this.defaultRequestParams,
 			...(options.requestParams ?? {}),
 		};
+		const tools = sanitizeToolDefinitions(requestParams.tools);
 
-		return super._createRequest(messages, { ...options, requestParams }, stream);
+		return super._createRequest(
+			messages,
+			{
+				...options,
+				requestParams: {
+					...requestParams,
+					...(tools === undefined ? {} : { tools }),
+				},
+			},
+			stream,
+		);
 	}
 }
 
@@ -332,16 +404,19 @@ export class LmChatOciGenAi implements INodeType {
 					.filter((model) => {
 						if (!normalizedFilter) return true;
 						const name = model.displayName ?? '';
-						const id = model.id ?? '';
+						const id = getOnDemandModelId(model);
 						return (
 							name.toLowerCase().includes(normalizedFilter) ||
 							id.toLowerCase().includes(normalizedFilter)
 						);
 					})
-					.map((model) => ({
-						name: model.displayName ?? model.id ?? 'OCI Chat Model',
-						value: model.id ?? '',
-					}))
+					.map((model) => {
+						const modelId = getOnDemandModelId(model);
+						return {
+							name: model.displayName || modelId || 'OCI Chat Model',
+							value: modelId,
+						};
+					})
 					.filter((model) => model.value.length > 0)
 					.sort((a, b) => a.name.localeCompare(b.name));
 
