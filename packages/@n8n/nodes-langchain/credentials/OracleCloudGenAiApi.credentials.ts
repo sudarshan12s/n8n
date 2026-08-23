@@ -137,12 +137,12 @@ export class OracleCloudGenAiApi implements ICredentialType {
 			required: true,
 		},
 		{
-			displayName: 'Service Endpoint',
+			displayName: 'Inference Endpoint',
 			name: 'serviceEndpoint',
 			type: 'string',
 			default: '',
 			placeholder: 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com',
-			description: 'Custom endpoint URL if using a private endpoint or non-default region route',
+			description: 'Custom URL for a private inference endpoint',
 		},
 	];
 
@@ -193,10 +193,6 @@ export class OracleCloudGenAiApi implements ICredentialType {
 
 				if (regionId) {
 					client.region = common.Region.fromRegionId(regionId);
-				}
-
-				if (data.serviceEndpoint?.trim()) {
-					client.endpoint = data.serviceEndpoint.trim();
 				}
 
 				const compartmentId = data.tenancyId?.trim();

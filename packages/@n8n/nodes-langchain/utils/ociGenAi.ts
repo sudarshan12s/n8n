@@ -100,9 +100,6 @@ export async function createOciGenAiModelClient(
 	if (credentials.regionId) {
 		client.region = common.Region.fromRegionId(credentials.regionId.trim());
 	}
-	if (credentials.serviceEndpoint?.trim()) {
-		client.endpoint = credentials.serviceEndpoint.trim();
-	}
 
 	return client;
 }

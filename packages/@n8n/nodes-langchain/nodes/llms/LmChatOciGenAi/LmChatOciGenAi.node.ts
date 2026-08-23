@@ -60,6 +60,18 @@ function getModelId(value: unknown): string {
 	throw new UserError('Invalid chat model value');
 }
 
+/**
+ * Keep this as a chat-model subclass rather than returning model.bind(...).
+ *
+ * Calling bind() returns a RunnableBinding wrapper. That wrapper can obscure
+ * chat-model-specific capabilities such as bindTools() from downstream n8n
+ * agent code, which then has to unwrap the binding to recover the underlying
+ * BaseChatModel.
+ *
+ * By subclassing OciGenAiGenericChat and injecting request defaults in
+ * _createRequest(), the returned object remains a native chat model while
+ * still applying the node-level defaults.
+ */
 class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 	private readonly defaultRequestParams: OciChatRequestParams;
 
@@ -239,7 +251,7 @@ export class LmChatOciGenAi implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'OCI Generative AI Chat Model',
 		name: 'lmChatOciGenAi',
-		icon: 'file:ociGenAi.svg',
+		icon: 'file:../../shared/icons/oracle.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'Use OCI Generative AI chat models with n8n AI chains and agents',

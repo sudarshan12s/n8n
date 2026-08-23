@@ -208,7 +208,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Embeddings OCI Generative AI',
 		name: 'embeddingsOciGenAi',
-		icon: 'file:ociGenAi.svg',
+		icon: 'file:../../shared/icons/oracle.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'Generate embeddings using OCI Generative AI',
