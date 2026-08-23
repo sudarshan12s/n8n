@@ -15,45 +15,14 @@ import {
 	type SupplyData,
 } from 'n8n-workflow';
 
-import { createOciGenAiClient, isOciGenAiCredentials } from '../../../utils/ociGenAi';
+import {
+	createOciGenAiClient,
+	getOnDemandEmbeddingModels,
+	isOciGenAiCredentials,
+} from '../../../utils/ociGenAi';
 
 const DEFAULT_BATCH_SIZE = 96;
 const DEFAULT_MAX_CONCURRENCY = 2;
-
-type OnDemandEmbeddingModel = {
-	displayName: string;
-	modelId: string;
-	regions: string[];
-};
-
-// Inference requires provider model IDs; ListModels returns management resource IDs.
-const ON_DEMAND_EMBEDDING_MODELS: OnDemandEmbeddingModel[] = [
-	{
-		displayName: 'Cohere Embed 4',
-		modelId: 'cohere.embed-v4.0',
-		regions: ['us-ashburn-1', 'us-chicago-1', 'me-abudhabi-1', 'me-riyadh-1', 'ap-osaka-1'],
-	},
-	{
-		displayName: 'Cohere Embed English 3',
-		modelId: 'cohere.embed-english-v3.0',
-		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
-	},
-	{
-		displayName: 'Cohere Embed English Light 3',
-		modelId: 'cohere.embed-english-light-v3.0',
-		regions: ['us-chicago-1'],
-	},
-	{
-		displayName: 'Cohere Embed Multilingual 3',
-		modelId: 'cohere.embed-multilingual-v3.0',
-		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
-	},
-	{
-		displayName: 'Cohere Embed Multilingual Light 3',
-		modelId: 'cohere.embed-multilingual-light-v3.0',
-		regions: ['us-chicago-1'],
-	},
-];
 
 type ResourceLocatorValue = {
 	mode: string;
@@ -294,15 +263,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
 				}
 
-				const normalizedFilter = (filter ?? '').trim().toLowerCase();
-				const regionId = credentials.regionId.trim().toLowerCase();
-				const results = ON_DEMAND_EMBEDDING_MODELS.filter(
-					(model) =>
-						model.regions.includes(regionId) &&
-						(!normalizedFilter ||
-							model.displayName.toLowerCase().includes(normalizedFilter) ||
-							model.modelId.includes(normalizedFilter)),
-				).map(
+				const results = getOnDemandEmbeddingModels(credentials.regionId, filter).map(
 					(model): INodeListSearchItems => ({
 						name: model.displayName,
 						value: model.modelId,

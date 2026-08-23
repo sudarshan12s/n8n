@@ -16,6 +16,97 @@ export interface OciGenAiCredentials {
 	serviceEndpoint?: string;
 }
 
+export type OciGenAiCatalogModel = {
+	id: string;
+	vendor?: string;
+	displayName?: string;
+	timeOnDemandRetired?: Date | string | null;
+};
+
+export type OciGenAiOnDemandEmbeddingModel = {
+	displayName: string;
+	modelId: string;
+	regions: string[];
+};
+
+const ON_DEMAND_EMBEDDING_MODELS: OciGenAiOnDemandEmbeddingModel[] = [
+	{
+		displayName: 'Cohere Embed 4',
+		modelId: 'cohere.embed-v4.0',
+		regions: ['us-ashburn-1', 'us-chicago-1', 'me-abudhabi-1', 'me-riyadh-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed English 3',
+		modelId: 'cohere.embed-english-v3.0',
+		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed English Light 3',
+		modelId: 'cohere.embed-english-light-v3.0',
+		regions: ['us-chicago-1'],
+	},
+	{
+		displayName: 'Cohere Embed Multilingual 3',
+		modelId: 'cohere.embed-multilingual-v3.0',
+		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
+	},
+	{
+		displayName: 'Cohere Embed Multilingual Light 3',
+		modelId: 'cohere.embed-multilingual-light-v3.0',
+		regions: ['us-chicago-1'],
+	},
+];
+
+export function isOnDemandModelAvailable(model: OciGenAiCatalogModel): boolean {
+	if (model.timeOnDemandRetired == null) return true;
+
+	const retiredAt =
+		typeof model.timeOnDemandRetired === 'string'
+			? Date.parse(model.timeOnDemandRetired)
+			: model.timeOnDemandRetired.getTime();
+
+	return Number.isNaN(retiredAt) || retiredAt > Date.now();
+}
+
+export function getOnDemandModelId(model: OciGenAiCatalogModel): string {
+	if (!model.id.startsWith('ocid1.generativeaimodel.')) {
+		return model.id;
+	}
+
+	const vendor = model.vendor?.trim();
+	const displayName = model.displayName?.trim();
+	if (!vendor || !displayName) {
+		return '';
+	}
+
+	const modelName = (
+		displayName.toLowerCase().startsWith(vendor.toLowerCase())
+			? displayName.slice(vendor.length).trim()
+			: displayName
+	).replace(/^[^a-z0-9]+/i, '');
+
+	return `${vendor}.${modelName}`
+		.toLowerCase()
+		.replace(/\s+/g, '-')
+		.replace(/[^a-z0-9.+-]/g, '');
+}
+
+export function getOnDemandEmbeddingModels(
+	regionId: string,
+	filter?: string,
+): OciGenAiOnDemandEmbeddingModel[] {
+	const normalizedRegionId = regionId.trim().toLowerCase();
+	const normalizedFilter = filter?.trim().toLowerCase() ?? '';
+
+	return ON_DEMAND_EMBEDDING_MODELS.filter(
+		(model) =>
+			model.regions.includes(normalizedRegionId) &&
+			(!normalizedFilter ||
+				model.displayName.toLowerCase().includes(normalizedFilter) ||
+				model.modelId.includes(normalizedFilter)),
+	);
+}
+
 export function isOciGenAiCredentials(
 	credentials: ICredentialDataDecryptedObject,
 ): credentials is ICredentialDataDecryptedObject & OciGenAiCredentials {

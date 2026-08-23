@@ -1,4 +1,5 @@
 import { OciGenAiGenericChat } from '@oracle/langchain-oci';
+import type { BaseMessage } from '@langchain/core/messages';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
@@ -18,7 +19,9 @@ import type { models as ociInferenceModels } from 'oci-generativeaiinference';
 import {
 	createOciGenAiClient,
 	createOciGenAiModelClient,
+	getOnDemandModelId,
 	isOciGenAiCredentials,
+	isOnDemandModelAvailable,
 } from '../../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'meta.llama-3.3-70b-instruct';
@@ -61,35 +64,6 @@ function getModelId(value: unknown): string {
 	throw new UserError('Invalid chat model value');
 }
 
-type OciModelListItem = {
-	id: string;
-	vendor?: string;
-	displayName?: string;
-};
-
-function getOnDemandModelId(model: OciModelListItem): string {
-	if (!model.id.startsWith('ocid1.generativeaimodel.')) {
-		return model.id;
-	}
-
-	const vendor = model.vendor?.trim();
-	const displayName = model.displayName?.trim();
-	if (!vendor || !displayName) {
-		return '';
-	}
-
-	const modelName = (
-		displayName.toLowerCase().startsWith(vendor.toLowerCase())
-			? displayName.slice(vendor.length).trim()
-			: displayName
-	).replace(/^[^a-z0-9]+/i, '');
-
-	return `${vendor}.${modelName}`
-		.toLowerCase()
-		.replace(/\s+/g, '-')
-		.replace(/[^a-z0-9.+-]/g, '');
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -121,6 +95,32 @@ function sanitizeToolDefinitions(
 	}));
 }
 
+function stringifyMessageContent(value: unknown): string {
+	if (typeof value === 'string') {
+		return value;
+	}
+
+	if (Array.isArray(value)) {
+		return value.map(stringifyMessageContent).join('\n');
+	}
+
+	if (isRecord(value) && typeof value.text === 'string') {
+		return value.text;
+	}
+
+	return JSON.stringify(value) ?? '';
+}
+
+function normalizeMessageContent(message: BaseMessage): BaseMessage {
+	if (typeof message.content === 'string') {
+		return message;
+	}
+
+	return Object.assign(Object.create(Object.getPrototypeOf(message)), message, {
+		content: stringifyMessageContent(message.content),
+	});
+}
+
 /**
  * Keep this as a chat-model subclass rather than returning model.bind(...).
  *
@@ -143,6 +143,14 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 	) {
 		super(params);
 		this.defaultRequestParams = params.defaultRequestParams ?? {};
+	}
+
+	override _prepareRequest(
+		messages: Parameters<OciGenAiGenericChat['_prepareRequest']>[0],
+		options: Parameters<OciGenAiGenericChat['_prepareRequest']>[1],
+		stream?: boolean,
+	) {
+		return super._prepareRequest(messages.map(normalizeMessageContent), options, stream);
 	}
 
 	override _createRequest(
@@ -402,6 +410,7 @@ export class LmChatOciGenAi implements INodeType {
 
 				const results: INodeListSearchItems[] = (response.modelCollection.items ?? [])
 					.filter((model) => {
+						if (!isOnDemandModelAvailable(model)) return false;
 						if (!normalizedFilter) return true;
 						const name = model.displayName ?? '';
 						const id = getOnDemandModelId(model);
