@@ -42,51 +42,24 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 	if (typeof value !== 'object' || value === null) {
 		return false;
 	}
-
-	if (!('mode' in value) || !('value' in value)) {
-		return false;
-	}
-
-	const candidate = value as {
-		mode?: unknown;
-		value?: unknown;
-	};
-
+	const candidate = value as Record<string, unknown>;
 	return typeof candidate.mode === 'string' && typeof candidate.value === 'string';
 }
 
 function getModelId(value: unknown): string {
 	if (isResourceLocatorValue(value)) {
 		const modelId = value.value.trim();
-
-		if (!modelId) {
-			throw new Error('Chat model is required');
-		}
-
+		if (!modelId) throw new Error('Chat model is required');
 		return modelId;
 	}
-
 	if (typeof value === 'string') {
 		const modelId = value.trim();
-
-		if (!modelId) {
-			throw new Error('Chat model is required');
-		}
-
+		if (!modelId) throw new Error('Chat model is required');
 		return modelId;
 	}
-
 	throw new Error('Invalid chat model value');
 }
 
-/**
- * Small n8n-specific adapter that preserves the Oracle Generic Chat model
- * while injecting node-level default request parameters.
- *
- * We intentionally subclass rather than calling .bind() in supplyData().
- * A RunnableBinding would hide the model's bindTools() API from downstream
- * n8n agents.
- */
 class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 	private readonly defaultRequestParams: OciChatRequestParams;
 
@@ -96,7 +69,6 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 		},
 	) {
 		super(params);
-
 		this.defaultRequestParams = params.defaultRequestParams ?? {};
 	}
 
@@ -110,14 +82,7 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 			...(options.requestParams ?? {}),
 		};
 
-		return super._createRequest(
-			messages,
-			{
-				...options,
-				requestParams,
-			},
-			stream,
-		);
+		return super._createRequest(messages, { ...options, requestParams }, stream);
 	}
 }
 
@@ -321,57 +286,38 @@ export class LmChatOciGenAi implements INodeType {
 				filter?: string,
 				paginationToken?: string,
 			): Promise<INodeListSearchResult> {
-				const compartmentId = this.getNodeParameter('compartmentId', '') as string;
+				const compartmentId = (this.getNodeParameter('compartmentId', '') as string).trim();
 
-				if (!compartmentId.trim()) {
-					throw new NodeOperationError(
-						this.getNode(),
-						'Enter a Compartment OCID before searching for models.',
-					);
+				if (!compartmentId) {
+					return {
+						results: [
+							{
+								name: 'Enter a Compartment OCID to load models',
+								value: '',
+							},
+						],
+					};
 				}
 
 				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
-
 				const client = await createOciGenAiModelClient(credentials);
-
-				const vendor = this.getNodeParameter('vendor', '') as string;
+				const vendor = (this.getNodeParameter('vendor', '') as string).trim();
 
 				const response = await client.listModels({
-					compartmentId: compartmentId.trim(),
-
-					/*
-					 * OCI's model catalog supports
-					 * server-side CHAT capability filtering.
-					 */
+					compartmentId,
 					capability: ['CHAT'],
-
-					...(vendor.trim()
-						? {
-								vendor: vendor.trim(),
-							}
-						: {}),
-
+					...(vendor ? { vendor } : {}),
 					limit: 100,
-
-					...(paginationToken
-						? {
-								page: paginationToken,
-							}
-						: {}),
+					...(paginationToken ? { page: paginationToken } : {}),
 				});
 
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
 
 				const results: INodeListSearchItems[] = (response.items ?? [])
 					.filter((model) => {
-						if (!normalizedFilter) {
-							return true;
-						}
-
+						if (!normalizedFilter) return true;
 						const name = model.displayName ?? '';
-
 						const id = model.id ?? '';
-
 						return (
 							name.toLowerCase().includes(normalizedFilter) ||
 							id.toLowerCase().includes(normalizedFilter)
@@ -395,30 +341,33 @@ export class LmChatOciGenAi implements INodeType {
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
 
-		const modelParameter = this.getNodeParameter('model', itemIndex);
+		let model: string;
+		try {
+			const modelParameter = this.getNodeParameter('model', itemIndex);
+			model = getModelId(modelParameter);
+		} catch (error) {
+			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+		}
 
-		const model = getModelId(modelParameter);
+		const compartmentId = (this.getNodeParameter('compartmentId', itemIndex, '') as string).trim();
 
-		const compartmentId = this.getNodeParameter('compartmentId', itemIndex) as string;
-
-		if (!compartmentId.trim()) {
-			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.');
+		if (!compartmentId) {
+			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.', { itemIndex });
 		}
 
 		const servingMode = this.getNodeParameter('servingMode', itemIndex, 'onDemand') as
 			| 'onDemand'
 			| 'dedicated';
 
-		const dedicatedEndpointId = this.getNodeParameter(
-			'dedicatedEndpointId',
-			itemIndex,
-			'',
-		) as string;
+		const dedicatedEndpointId = (
+			this.getNodeParameter('dedicatedEndpointId', itemIndex, '') as string
+		).trim();
 
-		if (servingMode === 'dedicated' && !dedicatedEndpointId.trim()) {
+		if (servingMode === 'dedicated' && !dedicatedEndpointId) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
+				{ itemIndex },
 			);
 		}
 
@@ -434,7 +383,7 @@ export class LmChatOciGenAi implements INodeType {
 
 		const topK = typeof options.topK === 'number' && options.topK > 0 ? options.topK : undefined;
 
-		const seed = typeof options.seed === 'number' && options.seed > 0 ? options.seed : undefined;
+		const seed = typeof options.seed === 'number' && options.seed >= 0 ? options.seed : undefined;
 
 		const client = await createOciGenAiClient(credentials);
 
@@ -448,15 +397,9 @@ export class LmChatOciGenAi implements INodeType {
 
 		const modelParams = {
 			client,
-			compartmentId: compartmentId.trim(),
+			compartmentId,
 			defaultRequestParams,
-			...(servingMode === 'onDemand'
-				? {
-						onDemandModelId: model,
-					}
-				: {
-						dedicatedEndpointId: dedicatedEndpointId.trim(),
-					}),
+			...(servingMode === 'onDemand' ? { onDemandModelId: model } : { dedicatedEndpointId }),
 		};
 
 		const chatModel = new N8nOciGenAiGenericChat(modelParams);

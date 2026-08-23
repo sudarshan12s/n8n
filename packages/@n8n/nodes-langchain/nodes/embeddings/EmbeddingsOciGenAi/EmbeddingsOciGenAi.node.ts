@@ -2,6 +2,8 @@ import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import { logWrapper } from '@n8n/ai-utilities';
 import {
 	NodeConnectionTypes,
+	NodeOperationError,
+	type IDataObject,
 	type ILoadOptionsFunctions,
 	type INodeListSearchItems,
 	type INodeListSearchResult,
@@ -32,36 +34,24 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 		return false;
 	}
 
-	if (!('mode' in value) || !('value' in value)) {
-		return false;
-	}
-
-	const candidate = value as {
-		mode?: unknown;
-		value?: unknown;
-	};
-
+	const candidate = value as Record<string, unknown>;
 	return typeof candidate.mode === 'string' && typeof candidate.value === 'string';
 }
 
 function getModelId(value: unknown): string {
 	if (isResourceLocatorValue(value)) {
 		const modelId = value.value.trim();
-
 		if (!modelId) {
 			throw new Error('Embedding model is required');
 		}
-
 		return modelId;
 	}
 
 	if (typeof value === 'string') {
 		const modelId = value.trim();
-
 		if (!modelId) {
 			throw new Error('Embedding model is required');
 		}
-
 		return modelId;
 	}
 
@@ -253,61 +243,40 @@ export class EmbeddingsOciGenAi implements INodeType {
 				filter?: string,
 				paginationToken?: string,
 			): Promise<INodeListSearchResult> {
-				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+				const compartmentId = (this.getNodeParameter('compartmentId', '') as string).trim();
 
-				const compartmentId = this.getNodeParameter('compartmentId', '') as string;
-
-				if (!compartmentId.trim()) {
-					throw new Error('Enter a Compartment OCID before searching for embedding models.');
+				if (!compartmentId) {
+					return {
+						results: [
+							{
+								name: 'Enter a Compartment OCID to load models',
+								value: '',
+							},
+						],
+					};
 				}
 
+				const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
 				const client = await createOciGenAiModelClient(credentials);
 
-				/*
-				 * OCI's Generative AI control-plane API should be
-				 * used for model discovery. We intentionally keep
-				 * this filtering client-side so the search box can
-				 * match both display name and model ID.
-				 */
 				const response = await client.listModels({
-					compartmentId: compartmentId.trim(),
+					compartmentId,
 					limit: 100,
-					...(paginationToken
-						? {
-								page: paginationToken,
-							}
-						: {}),
+					...(paginationToken ? { page: paginationToken } : {}),
 				});
 
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
 
 				const results = (response.items ?? [])
 					.filter((model) => {
-						/*
-						 * The OCI model catalog capability enum
-						 * has changed across SDK releases.
-						 *
-						 * For portability, filter embeddings
-						 * using the model's capability metadata
-						 * when present, otherwise fall back to
-						 * the model ID/display name.
-						 */
 						const capabilities = model.capabilities ?? [];
-
 						const isEmbeddingModel =
-							capabilities.some((capability) =>
-								String(capability).toLowerCase().includes('embed'),
-							) ||
+							capabilities.some((cap) => String(cap).toLowerCase().includes('embed')) ||
 							model.id?.toLowerCase().includes('embed') ||
 							model.displayName?.toLowerCase().includes('embed');
 
-						if (!isEmbeddingModel) {
-							return false;
-						}
-
-						if (!normalizedFilter) {
-							return true;
-						}
+						if (!isEmbeddingModel) return false;
+						if (!normalizedFilter) return true;
 
 						return (
 							model.id?.toLowerCase().includes(normalizedFilter) ||
@@ -318,7 +287,6 @@ export class EmbeddingsOciGenAi implements INodeType {
 						(model): INodeListSearchItems => ({
 							name: model.displayName ?? model.id ?? 'OCI Embedding Model',
 							value: model.id ?? '',
-							url: model.id ? undefined : undefined,
 						}),
 					)
 					.filter((model) => model.value !== '')
@@ -335,49 +303,55 @@ export class EmbeddingsOciGenAi implements INodeType {
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
 
-		const modelParameter = this.getNodeParameter('model', itemIndex);
+		let model: string;
+		try {
+			const modelParameter = this.getNodeParameter('model', itemIndex);
+			model = getModelId(modelParameter);
+		} catch (error) {
+			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+		}
 
-		const model = getModelId(modelParameter);
+		const compartmentId = (this.getNodeParameter('compartmentId', itemIndex, '') as string).trim();
 
-		const compartmentId = this.getNodeParameter('compartmentId', itemIndex) as string;
-
-		if (!compartmentId.trim()) {
-			throw new Error('Compartment OCID is required.');
+		if (!compartmentId) {
+			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.', { itemIndex });
 		}
 
 		const servingMode = this.getNodeParameter('servingMode', itemIndex, 'onDemand') as
 			| 'onDemand'
 			| 'dedicated';
 
-		const dedicatedEndpointId = this.getNodeParameter(
-			'dedicatedEndpointId',
-			itemIndex,
-			'',
-		) as string;
+		const dedicatedEndpointId = (
+			this.getNodeParameter('dedicatedEndpointId', itemIndex, '') as string
+		).trim();
 
-		if (servingMode === 'dedicated' && !dedicatedEndpointId.trim()) {
-			throw new Error(
+		if (servingMode === 'dedicated' && !dedicatedEndpointId) {
+			throw new NodeOperationError(
+				this.getNode(),
 				'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
+				{ itemIndex },
 			);
 		}
 
-		const options = this.getNodeParameter('options', itemIndex, {}) as {
-			batchSize?: number;
-			maxConcurrency?: number;
-			outputDimensions?: number;
-			truncate?: string;
-		};
+		const options = this.getNodeParameter('options', itemIndex, {}) as IDataObject;
 
-		const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
-
-		const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+		const batchSize = (options.batchSize as number) ?? DEFAULT_BATCH_SIZE;
+		const maxConcurrency = (options.maxConcurrency as number) ?? DEFAULT_MAX_CONCURRENCY;
 
 		if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 96) {
-			throw new Error('Batch Size must be an integer between 1 and 96.');
+			throw new NodeOperationError(
+				this.getNode(),
+				'Batch Size must be an integer between 1 and 96.',
+				{ itemIndex },
+			);
 		}
 
 		if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
-			throw new Error('Maximum Concurrency must be a positive integer.');
+			throw new NodeOperationError(
+				this.getNode(),
+				'Maximum Concurrency must be a positive integer.',
+				{ itemIndex },
+			);
 		}
 
 		const outputDimensions =
@@ -387,40 +361,16 @@ export class EmbeddingsOciGenAi implements INodeType {
 
 		const truncate = typeof options.truncate === 'string' ? options.truncate : undefined;
 
-		/*
-		 * createOciGenAiClient() returns the authenticated
-		 * GenerativeAiInferenceClient used by @oracle/langchain-oci.
-		 */
 		const client = await createOciGenAiClient(credentials);
 
 		const embeddings = new OciGenAiEmbeddings({
 			client,
-
-			compartmentId: compartmentId.trim(),
-
+			compartmentId,
 			batchSize,
-
 			maxConcurrency,
-
-			...(outputDimensions !== undefined
-				? {
-						outputDimensions,
-					}
-				: {}),
-
-			...(truncate
-				? {
-						truncate: truncate as 'NONE' | 'START' | 'END',
-					}
-				: {}),
-
-			...(servingMode === 'dedicated'
-				? {
-						dedicatedEndpointId: dedicatedEndpointId.trim(),
-					}
-				: {
-						onDemandModelId: model,
-					}),
+			...(outputDimensions !== undefined ? { outputDimensions } : {}),
+			...(truncate ? { truncate: truncate as 'NONE' | 'START' | 'END' } : {}),
+			...(servingMode === 'dedicated' ? { dedicatedEndpointId } : { onDemandModelId: model }),
 		});
 
 		return {

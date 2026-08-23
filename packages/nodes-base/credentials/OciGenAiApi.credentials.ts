@@ -1,11 +1,10 @@
-import type { ICredentialType, INodeProperties } from 'n8n-workflow';
+import type { ICredentialTestRequest, ICredentialType, INodeProperties } from 'n8n-workflow';
+import { testOciGenAiConnection, type OciGenAiCredentials } from './ociGenAi';
 
-export class OciGenAiApi implements ICredentialType {
+export class OracleCloudGenAiApi implements ICredentialType {
 	name = 'ociGenAiApi';
-
-	displayName = 'OCI Generative AI';
-
-	documentationUrl = 'https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm';
+	displayName = 'OCI Generative AI API';
+	documentationUrl = 'https://docs.oracle.com/en-us/iaas/Content/generative-ai/overview.htm';
 
 	properties: INodeProperties[] = [
 		{
@@ -26,82 +25,68 @@ export class OciGenAiApi implements ICredentialType {
 					value: 'resourcePrincipal',
 				},
 				{
-					name: 'Session',
+					name: 'Session Token / Config File',
 					value: 'session',
 				},
 			],
 			default: 'apiKey',
-			description: 'Authentication method used to access OCI Generative AI.',
 		},
-
-		// ---------------------------------------------------------------------
-		// API Key authentication
-		// ---------------------------------------------------------------------
 		{
 			displayName: 'Tenancy OCID',
 			name: 'tenancyId',
 			type: 'string',
-			default: '',
-			required: true,
-			placeholder: 'ocid1.tenancy.oc1..aaaa...',
 			displayOptions: {
 				show: {
 					authentication: ['apiKey'],
 				},
 			},
-			description: 'OCID of the OCI tenancy.',
+			default: '',
+			required: true,
 		},
 		{
 			displayName: 'User OCID',
 			name: 'userId',
 			type: 'string',
-			default: '',
-			required: true,
-			placeholder: 'ocid1.user.oc1..aaaa...',
 			displayOptions: {
 				show: {
 					authentication: ['apiKey'],
 				},
 			},
-			description: 'OCID of the OCI user associated with the API signing key.',
+			default: '',
+			required: true,
 		},
 		{
 			displayName: 'Fingerprint',
 			name: 'fingerprint',
 			type: 'string',
-			default: '',
-			required: true,
-			placeholder: '12:34:56:78:90:ab:cd:ef:...',
 			displayOptions: {
 				show: {
 					authentication: ['apiKey'],
 				},
 			},
-			description: 'Fingerprint of the OCI API signing key.',
+			default: '',
+			required: true,
 		},
 		{
 			displayName: 'Private Key',
 			name: 'privateKey',
 			type: 'string',
-			default: '',
-			required: true,
 			typeOptions: {
 				password: true,
-				rows: 8,
+				rows: 4,
 			},
 			displayOptions: {
 				show: {
 					authentication: ['apiKey'],
 				},
 			},
-			placeholder: '-----BEGIN PRIVATE KEY-----',
-			description: 'PEM-encoded private key used to sign OCI API requests.',
+			default: '',
+			required: true,
 		},
 		{
 			displayName: 'Passphrase',
 			name: 'passphrase',
 			type: 'string',
-			default: '',
 			typeOptions: {
 				password: true,
 			},
@@ -110,51 +95,38 @@ export class OciGenAiApi implements ICredentialType {
 					authentication: ['apiKey'],
 				},
 			},
-			description: 'Optional passphrase for the private key if the key is encrypted.',
+			default: '',
 		},
-
-		// ---------------------------------------------------------------------
-		// Session authentication
-		// ---------------------------------------------------------------------
 		{
 			displayName: 'Config File Path',
 			name: 'configFilePath',
 			type: 'string',
-			default: '',
-			required: true,
-			placeholder: '~/.oci/config',
 			displayOptions: {
 				show: {
 					authentication: ['session'],
 				},
 			},
-			description: 'Path to the OCI CLI/SDK configuration file accessible from the n8n runtime.',
+			default: '~/.oci/config',
+			required: true,
 		},
 		{
 			displayName: 'Config Profile',
 			name: 'configProfile',
 			type: 'string',
-			default: 'DEFAULT',
-			required: true,
 			displayOptions: {
 				show: {
 					authentication: ['session'],
 				},
 			},
-			description: 'Profile in the OCI configuration file containing the session credentials.',
+			default: 'DEFAULT',
+			required: true,
 		},
-
-		// ---------------------------------------------------------------------
-		// Common configuration
-		// ---------------------------------------------------------------------
 		{
-			displayName: 'Region',
+			displayName: 'Region ID',
 			name: 'regionId',
 			type: 'string',
-			default: '',
+			default: 'us-chicago-1',
 			required: true,
-			placeholder: 'us-chicago-1',
-			description: 'OCI region used by the Generative AI service, for example us-chicago-1.',
 		},
 		{
 			displayName: 'Service Endpoint',
@@ -162,8 +134,14 @@ export class OciGenAiApi implements ICredentialType {
 			type: 'string',
 			default: '',
 			placeholder: 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com',
-			description:
-				'Optional override for the OCI Generative AI service endpoint. Leave empty to use the standard endpoint for the selected region.',
+			description: 'Custom endpoint URL if using a private endpoint or non-default region route',
 		},
 	];
+
+	test: ICredentialTestRequest = {
+		async request(this: ICredentialTestRequest['request']) {
+			const credentials = (await this.getCredentials('ociGenAiApi')) as OciGenAiCredentials;
+			await testOciGenAiConnection(credentials);
+		},
+	};
 }
