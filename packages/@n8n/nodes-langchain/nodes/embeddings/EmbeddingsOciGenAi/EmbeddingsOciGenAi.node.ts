@@ -19,6 +19,9 @@ import {
 	createOciGenAiClient,
 	getOnDemandEmbeddingModels,
 	isOciGenAiCredentials,
+	testOciGenAiConnection,
+	validateOciCompartmentId,
+	validateOciModelId,
 } from '../../../utils/ociGenAi';
 
 const DEFAULT_BATCH_SIZE = 96;
@@ -40,19 +43,19 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 
 function getModelId(node: INode, value: unknown, itemIndex?: number): string {
 	if (isResourceLocatorValue(value)) {
-		const modelId = value.value.trim();
-		if (!modelId) {
-			throw new NodeOperationError(node, 'Model is required', { itemIndex });
+		try {
+			return validateOciModelId(value.value);
+		} catch (error) {
+			throw new NodeOperationError(node, error as Error, { itemIndex });
 		}
-		return modelId;
 	}
 
 	if (typeof value === 'string') {
-		const modelId = value.trim();
-		if (!modelId) {
-			throw new NodeOperationError(node, 'Model is required', { itemIndex });
+		try {
+			return validateOciModelId(value);
+		} catch (error) {
+			throw new NodeOperationError(node, error as Error, { itemIndex });
 		}
-		return modelId;
 	}
 
 	throw new NodeOperationError(node, 'Invalid model value provided', { itemIndex });
@@ -238,6 +241,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 			{
 				name: 'ociGenAiApi',
 				required: true,
+				testedBy: 'testConnection',
 			},
 		],
 		inputs: [],
@@ -253,6 +257,9 @@ export class EmbeddingsOciGenAi implements INodeType {
 	};
 
 	methods = {
+		credentialTest: {
+			testConnection: testOciGenAiConnection,
+		},
 		listSearch: {
 			async searchEmbeddingModels(
 				this: ILoadOptionsFunctions,
@@ -293,10 +300,13 @@ export class EmbeddingsOciGenAi implements INodeType {
 			});
 		}
 
-		const compartmentId = (this.getNodeParameter('compartmentId', itemIndex, '') as string).trim();
-
-		if (!compartmentId) {
-			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.', { itemIndex });
+		let compartmentId: string;
+		try {
+			compartmentId = validateOciCompartmentId(
+				this.getNodeParameter('compartmentId', itemIndex, '') as string,
+			);
+		} catch (error) {
+			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 		}
 
 		const servingMode = this.getNodeParameter('servingMode', itemIndex, 'onDemand') as

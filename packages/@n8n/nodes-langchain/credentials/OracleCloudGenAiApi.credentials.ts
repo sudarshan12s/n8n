@@ -1,13 +1,4 @@
-import type {
-	IAllExecuteFunctions,
-	ICredentialDataDecryptedObject,
-	ICredentialsDecrypted,
-	ICredentialType,
-	INodeCredentialTestResult,
-	INodeProperties,
-} from 'n8n-workflow';
-import * as common from 'oci-common';
-import * as genai from 'oci-generativeai';
+import type { ICredentialType, INodeProperties } from 'n8n-workflow';
 
 export class OracleCloudGenAiApi implements ICredentialType {
 	name = 'ociGenAiApi';
@@ -142,74 +133,7 @@ export class OracleCloudGenAiApi implements ICredentialType {
 			type: 'string',
 			default: '',
 			placeholder: 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com',
-			description: 'Custom URL for a private inference endpoint',
+			description: 'Custom OCI inference endpoint',
 		},
 	];
-
-	// Custom credential test methods mapping
-	credentialTest = {
-		async testConnection(
-			this: IAllExecuteFunctions,
-			credentialData: ICredentialsDecrypted<ICredentialDataDecryptedObject>,
-		): Promise<INodeCredentialTestResult> {
-			try {
-				const data = (credentialData.data ?? credentialData) as Record<string, string>;
-				const authMethod = data.authentication;
-				const regionId = data.regionId?.trim();
-
-				let authProvider: common.AuthenticationDetailsProvider;
-
-				if (authMethod === 'apiKey') {
-					let privateKey = data.privateKey?.trim() ?? '';
-					if (privateKey.includes('\\n')) {
-						privateKey = privateKey.replace(/\\n/g, '\n');
-					}
-
-					authProvider = new common.SimpleAuthenticationDetailsProvider(
-						data.tenancyId?.trim(),
-						data.userId?.trim(),
-						data.fingerprint?.trim(),
-						privateKey,
-						data.passphrase?.trim() || null,
-						common.Region.fromRegionId(regionId),
-					);
-				} else if (authMethod === 'instancePrincipal') {
-					authProvider =
-						await new common.InstancePrincipalsAuthenticationDetailsProviderBuilder().build();
-				} else if (authMethod === 'resourcePrincipal') {
-					authProvider = common.ResourcePrincipalAuthenticationDetailsProvider.builder();
-				} else if (authMethod === 'session') {
-					authProvider = new common.ConfigFileAuthenticationDetailsProvider(
-						data.configFilePath?.trim(),
-						data.configProfile?.trim(),
-					);
-				} else {
-					throw new Error(`Unsupported authentication method: ${authMethod}`);
-				}
-
-				const client = new genai.GenerativeAiClient({
-					authenticationDetailsProvider: authProvider,
-				});
-
-				if (regionId) {
-					client.region = common.Region.fromRegionId(regionId);
-				}
-
-				const compartmentId = data.tenancyId?.trim();
-				if (compartmentId) {
-					await client.listModels({ compartmentId, limit: 1 });
-				}
-
-				return {
-					status: 'OK',
-					message: 'Connection successful',
-				};
-			} catch (error) {
-				return {
-					status: 'Error',
-					message: (error as Error).message || 'Connection failed',
-				};
-			}
-		},
-	};
 }

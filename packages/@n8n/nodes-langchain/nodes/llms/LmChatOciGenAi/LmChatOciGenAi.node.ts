@@ -18,10 +18,11 @@ import type { models as ociInferenceModels } from 'oci-generativeaiinference';
 
 import {
 	createOciGenAiClient,
-	createOciGenAiModelClient,
-	getOnDemandModelId,
+	getCachedOciGenAiModelCatalogPage,
 	isOciGenAiCredentials,
-	isOnDemandModelAvailable,
+	testOciGenAiConnection,
+	validateOciCompartmentId,
+	validateOciModelId,
 } from '../../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'meta.llama-3.3-70b-instruct';
@@ -52,14 +53,10 @@ function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
 
 function getModelId(value: unknown): string {
 	if (isResourceLocatorValue(value)) {
-		const modelId = value.value.trim();
-		if (!modelId) throw new UserError('Chat model is required');
-		return modelId;
+		return validateOciModelId(value.value);
 	}
 	if (typeof value === 'string') {
-		const modelId = value.trim();
-		if (!modelId) throw new UserError('Chat model is required');
-		return modelId;
+		return validateOciModelId(value);
 	}
 	throw new UserError('Invalid chat model value');
 }
@@ -68,9 +65,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function removeUnsupportedJsonSchemaKeywords(value: unknown): unknown {
+function sanitizeOciToolSchema(value: unknown): unknown {
 	if (Array.isArray(value)) {
-		return value.map(removeUnsupportedJsonSchemaKeywords);
+		return value.map(sanitizeOciToolSchema);
 	}
 
 	if (!isRecord(value)) {
@@ -79,19 +76,20 @@ function removeUnsupportedJsonSchemaKeywords(value: unknown): unknown {
 
 	return Object.fromEntries(
 		Object.entries(value)
+			// OCI's function-declaration schema rejects LangChain's optional $schema keyword.
 			.filter(([key]) => key !== '$schema')
-			.map(([key, nestedValue]) => [key, removeUnsupportedJsonSchemaKeywords(nestedValue)]),
+			.map(([key, nestedValue]) => [key, sanitizeOciToolSchema(nestedValue)]),
 	);
 }
 
-function sanitizeToolDefinitions(
+function sanitizeOciToolDefinitions(
 	tools: ociInferenceModels.FunctionDefinition[] | undefined,
 ): ociInferenceModels.FunctionDefinition[] | undefined {
 	return tools?.map((tool) => ({
 		...tool,
 		...(tool.parameters === undefined
 			? {}
-			: { parameters: removeUnsupportedJsonSchemaKeywords(tool.parameters) }),
+			: { parameters: sanitizeOciToolSchema(tool.parameters) }),
 	}));
 }
 
@@ -117,6 +115,7 @@ function normalizeMessageContent(message: BaseMessage): BaseMessage {
 	}
 
 	return Object.assign(Object.create(Object.getPrototypeOf(message)), message, {
+		// The OCI SDK accepts text message content; preserve non-text content as readable JSON.
 		content: stringifyMessageContent(message.content),
 	});
 }
@@ -162,7 +161,7 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 			...this.defaultRequestParams,
 			...(options.requestParams ?? {}),
 		};
-		const tools = sanitizeToolDefinitions(requestParams.tools);
+		const tools = sanitizeOciToolDefinitions(requestParams.tools);
 
 		return super._createRequest(
 			messages,
@@ -356,6 +355,7 @@ export class LmChatOciGenAi implements INodeType {
 			{
 				name: 'ociGenAiApi',
 				required: true,
+				testedBy: 'testConnection',
 			},
 		],
 		inputs: [],
@@ -372,19 +372,25 @@ export class LmChatOciGenAi implements INodeType {
 	};
 
 	methods = {
+		credentialTest: {
+			testConnection: testOciGenAiConnection,
+		},
 		listSearch: {
 			async searchChatModels(
 				this: ILoadOptionsFunctions,
 				filter?: string,
 				paginationToken?: string,
 			): Promise<INodeListSearchResult> {
-				const compartmentId = (this.getNodeParameter('compartmentId', '') as string).trim();
-
-				if (!compartmentId) {
+				let compartmentId: string;
+				try {
+					compartmentId = validateOciCompartmentId(
+						this.getNodeParameter('compartmentId', '') as string,
+					);
+				} catch {
 					return {
 						results: [
 							{
-								name: 'Enter a Compartment OCID to Load Models',
+								name: 'Enter a Valid Compartment OCID to Load Models',
 								value: '',
 							},
 						],
@@ -395,43 +401,24 @@ export class LmChatOciGenAi implements INodeType {
 				if (!isOciGenAiCredentials(credentials)) {
 					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
 				}
-				const client = await createOciGenAiModelClient(credentials);
 				const vendor = (this.getNodeParameter('vendor', '') as string).trim();
 
-				const response = await client.listModels({
+				const response = await getCachedOciGenAiModelCatalogPage(credentials, {
 					compartmentId,
-					capability: [ociModels.ModelCapability.Chat],
-					...(vendor ? { vendor } : {}),
-					limit: 100,
-					...(paginationToken ? { page: paginationToken } : {}),
+					capability: ociModels.ModelCapability.Chat,
+					vendor,
+					paginationToken,
 				});
 
 				const normalizedFilter = (filter ?? '').trim().toLowerCase();
 
-				const results: INodeListSearchItems[] = (response.modelCollection.items ?? [])
-					.filter((model) => {
-						if (!isOnDemandModelAvailable(model)) return false;
-						if (!normalizedFilter) return true;
-						const name = model.displayName ?? '';
-						const id = getOnDemandModelId(model);
-						return (
-							name.toLowerCase().includes(normalizedFilter) ||
-							id.toLowerCase().includes(normalizedFilter)
-						);
-					})
-					.map((model) => {
-						const modelId = getOnDemandModelId(model);
-						return {
-							name: model.displayName || modelId || 'OCI Chat Model',
-							value: modelId,
-						};
-					})
-					.filter((model) => model.value.length > 0)
-					.sort((a, b) => a.name.localeCompare(b.name));
+				const results: INodeListSearchItems[] = response.searchModels
+					.filter((model) => !normalizedFilter || model.searchText.includes(normalizedFilter))
+					.map((model) => ({ name: model.name, value: model.id }));
 
 				return {
 					results,
-					paginationToken: response.opcNextPage,
+					paginationToken: response.nextPage,
 				};
 			},
 		},
@@ -453,10 +440,13 @@ export class LmChatOciGenAi implements INodeType {
 			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 		}
 
-		const compartmentId = (this.getNodeParameter('compartmentId', itemIndex, '') as string).trim();
-
-		if (!compartmentId) {
-			throw new NodeOperationError(this.getNode(), 'Compartment OCID is required.', { itemIndex });
+		let compartmentId: string;
+		try {
+			compartmentId = validateOciCompartmentId(
+				this.getNodeParameter('compartmentId', itemIndex, '') as string,
+			);
+		} catch (error) {
+			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
 		}
 
 		const servingMode = this.getNodeParameter('servingMode', itemIndex, 'onDemand') as
