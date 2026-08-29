@@ -86,6 +86,14 @@ describe('OCI input validation', () => {
 			expect(() => validateOciModelId('model\nname')).toThrow();
 			expect(() => validateOciModelId('')).toThrow();
 		});
+
+		it('rejects a pathological-looking value within a bounded time', () => {
+			const input = `${'a.'.repeat(127)}!`;
+			const startedAt = performance.now();
+
+			expect(() => validateOciModelId(input)).toThrow();
+			expect(performance.now() - startedAt).toBeLessThan(100);
+		});
 	});
 
 	describe('validateOciCompartmentId', () => {

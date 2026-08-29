@@ -52,7 +52,9 @@ describe('LmChatOciGenAi', () => {
 			if (name === 'model') return 'meta.llama-3.3-70b-instruct';
 			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
 			if (name === 'servingMode') return 'onDemand';
-			if (name === 'options') return { temperature: 0.2, maxTokens: 512, topP: 0.8 };
+			if (name === 'options') {
+				return { temperature: 0.2, maxTokens: 512, topP: 0.8, topK: 40, seed: 42 };
+			}
 			return '';
 		});
 		return context;
@@ -77,7 +79,7 @@ describe('LmChatOciGenAi', () => {
 				client: { client: 'inference' },
 				compartmentId: 'ocid1.compartment.oc1..test',
 				onDemandModelId: 'meta.llama-3.3-70b-instruct',
-				defaultRequestParams: { temperature: 0.2, maxTokens: 512, topP: 0.8 },
+				defaultRequestParams: { temperature: 0.2, maxTokens: 512, topP: 0.8, topK: 40, seed: 42 },
 			}),
 		);
 		expect(result.response).toBeInstanceOf(MockedOciGenAiGenericChat);

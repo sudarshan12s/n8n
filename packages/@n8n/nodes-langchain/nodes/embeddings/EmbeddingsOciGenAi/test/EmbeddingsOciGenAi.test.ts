@@ -82,6 +82,7 @@ describe('EmbeddingsOciGenAi', () => {
 				batchSize: 24,
 				maxConcurrency: 3,
 				outputDimensions: 1024,
+				truncate: 'END',
 			}),
 		);
 		expect(mockedLogWrapper).toHaveBeenCalledWith(expect.any(MockedOciGenAiEmbeddings), context);

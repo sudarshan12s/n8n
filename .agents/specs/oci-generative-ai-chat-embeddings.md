@@ -50,7 +50,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 Run from `packages/@n8n/nodes-langchain`:
 
 ```bash
-pnpm test utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
+pnpm test credentials/test/OracleCloudGenAiApi.credentials.test.ts utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
 pnpm typecheck
 pnpm lint
 ```

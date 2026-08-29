@@ -7,8 +7,9 @@ import * as common from 'oci-common';
 import * as genai from 'oci-generativeai';
 import * as genaiInference from 'oci-generativeaiinference';
 
-const OCI_MODEL_ID_PATTERN =
-	/^(?:ocid[0-9]+\.generativeaimodel\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+|[a-z0-9][a-z0-9.+_-]*(?:\.[a-z0-9][a-z0-9.+_-]*)*)$/i;
+const OCI_MODEL_OCID_PATTERN =
+	/^ocid[0-9]+\.generativeaimodel\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
+const OCI_PROVIDER_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._+-]*$/i;
 const OCI_COMPARTMENT_OCID_PATTERN =
 	/^ocid[0-9]+\.(?:compartment|tenancy)\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
 // Searchable selectors invoke list search per keystroke; retain a small, short-lived catalog.
@@ -40,7 +41,7 @@ export function validateOciModelId(modelId: string): string {
 	if ([...normalized].some((character) => character.charCodeAt(0) < 0x20 || character === '\x7f')) {
 		throw new UserError('OCI model ID contains invalid control characters');
 	}
-	if (!OCI_MODEL_ID_PATTERN.test(normalized)) {
+	if (!OCI_MODEL_OCID_PATTERN.test(normalized) && !OCI_PROVIDER_MODEL_ID_PATTERN.test(normalized)) {
 		throw new UserError(`Invalid OCI Generative AI model ID: "${normalized}"`);
 	}
 	return normalized;
