@@ -45,10 +45,21 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 
 ## Verification
 
+### Automated
+
 Run from `packages/@n8n/nodes-langchain`:
 
 ```bash
-pnpm test utils/ociGenAi.test.ts
+pnpm test utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
 pnpm typecheck
 pnpm lint
 ```
+
+### Manual
+
+1. Create an **OCI Generative AI API** credential with a valid authentication method and Region ID. Leave **Inference Endpoint (Advanced)** empty for the standard region-derived endpoint.
+2. On the Chat node, enter a valid compartment OCID and open the model selector. Type several characters and confirm results filter without repeated loading delays. Select an on-demand chat model and connect it to an AI Agent.
+3. Invoke the agent with a plain prompt, a tool call, and structured message content. Confirm text responses, streaming, and tool calls complete successfully.
+4. On the Embeddings node, select an on-demand model available in the selected region. Connect it to a vector store or embedding consumer and confirm it creates vectors.
+5. For dedicated serving, select **Dedicated** and enter an endpoint OCID. Confirm leaving the endpoint ID empty produces the expected validation error.
+6. Optionally set the advanced endpoint to the exact inference host for the selected region and realm. Confirm a mismatched realm, non-HTTPS URL, path, port, query, fragment, or credentials is rejected.
