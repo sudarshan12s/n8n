@@ -40,7 +40,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - [x] Add OCI credentials, chat node, embeddings node, and Oracle icons.
 - [x] Add shared OCI client, validation, model catalog, and credential-test utilities.
 - [x] Add OCI request compatibility handling for tools and structured messages.
-- [x] Add input-validation, endpoint-validation, credential-test, and catalog-cache unit coverage.
+- [x] Add input-validation, endpoint-validation, credential-test, catalog-cache, and node configuration unit coverage.
 - [ ] Replace the local `@oracle/langchain-oci` tarball with its published npm package.
 
 ## Verification
