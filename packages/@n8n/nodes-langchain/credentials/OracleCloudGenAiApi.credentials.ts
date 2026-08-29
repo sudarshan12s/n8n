@@ -128,12 +128,12 @@ export class OracleCloudGenAiApi implements ICredentialType {
 			required: true,
 		},
 		{
-			displayName: 'Inference Endpoint',
+			displayName: 'Inference Endpoint (Advanced)',
 			name: 'serviceEndpoint',
 			type: 'string',
 			default: '',
 			placeholder: 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com',
-			description: 'Custom OCI inference endpoint',
+			description: 'Optional. Leave empty to use the OCI endpoint for the Region ID.',
 		},
 	];
 }

@@ -18,7 +18,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 
 - API-key private keys accept JSON-escaped line breaks and are normalized before being passed to the OCI SDK.
 - Model and compartment IDs are validated before they reach OCI.
-- The optional inference endpoint must be an HTTPS OCI Generative AI inference hostname in an approved OCI realm. It cannot contain user credentials, ports, paths, query parameters, or fragments.
+- The optional advanced inference endpoint must be HTTPS and exactly match the configured OCI region and its realm as resolved by the OCI SDK. It cannot contain user credentials, ports, paths, query parameters, or fragments. Leaving it empty uses the SDK-derived endpoint.
 - A node-level credential test lists one model in the authenticated tenancy. Its failure response is generic so provider errors cannot expose credential material.
 
 ## Model Selection
@@ -27,7 +27,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - Management model OCIDs are converted to provider model IDs when OCI inference requires a provider ID.
 - Retired on-demand models are omitted from the chat selector.
 - Embeddings use an explicit region-aware on-demand model catalog because OCI model discovery is not reliable for embedding availability in all regions.
-- Chat catalog pages are cached for 60 seconds. Cache entries are isolated by non-secret authentication identity, region, compartment, vendor, capability, and page token. The cache is bounded, shares in-flight requests, and normalizes/sorts models once so typeahead only filters local search text.
+- Chat catalog pages are cached for 60 seconds. Cache entries are isolated by non-secret authentication identity, region, compartment, vendor, capability, and page token. The cache is bounded with insertion-order eviction, shares in-flight requests, and normalizes/sorts models once so typeahead only filters local search text.
 
 ## OCI Compatibility
 

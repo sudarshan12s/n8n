@@ -11,9 +11,6 @@ const OCI_MODEL_ID_PATTERN =
 	/^(?:ocid[0-9]+\.generativeaimodel\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+|[a-z0-9][a-z0-9.+_-]*(?:\.[a-z0-9][a-z0-9.+_-]*)*)$/i;
 const OCI_COMPARTMENT_OCID_PATTERN =
 	/^ocid[0-9]+\.(?:compartment|tenancy)\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
-// OCI clients sign outbound requests, so custom endpoints must stay within OCI.
-const OCI_INFERENCE_ENDPOINT_HOST_PATTERN =
-	/^inference\.generativeai\.[a-z0-9-]+\.oci\.oraclecloud(?:[234])?\.com$/i;
 // Searchable selectors invoke list search per keystroke; retain a small, short-lived catalog.
 const MODEL_CATALOG_CACHE_TTL_MS = 60_000;
 const MAX_MODEL_CATALOG_CACHE_ENTRIES = 100;
@@ -60,7 +57,25 @@ export function validateOciCompartmentId(compartmentId: string): string {
 	return normalized;
 }
 
-export function validateOciEndpoint(endpoint?: string): string | undefined {
+function getExpectedOciInferenceEndpointHost(regionId: string): string {
+	let region: common.Region;
+	try {
+		region = common.Region.fromRegionId(regionId.trim());
+	} catch {
+		throw new UserError('Region ID must be a valid OCI region');
+	}
+
+	if (!region) {
+		throw new UserError('Region ID must be a valid OCI region');
+	}
+
+	return `inference.generativeai.${region.regionId}.oci.${region.realm.secondLevelDomain}`;
+}
+
+export function validateOciEndpoint(
+	endpoint: string | undefined,
+	regionId: string,
+): string | undefined {
 	const normalized = endpoint?.trim();
 	if (!normalized) return undefined;
 
@@ -74,8 +89,9 @@ export function validateOciEndpoint(endpoint?: string): string | undefined {
 	if (url.protocol !== 'https:') {
 		throw new UserError('Inference endpoint must use HTTPS');
 	}
-	if (!OCI_INFERENCE_ENDPOINT_HOST_PATTERN.test(url.hostname)) {
-		throw new UserError('Inference endpoint must use a trusted Oracle Cloud hostname');
+	// OCI clients sign outbound requests, so endpoint overrides must match the selected region's realm.
+	if (url.hostname !== getExpectedOciInferenceEndpointHost(regionId)) {
+		throw new UserError('Inference endpoint must match the configured OCI region and realm');
 	}
 	if (url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) {
 		throw new UserError(
@@ -300,7 +316,7 @@ export async function createOciGenAiClient(
 	if (credentials.regionId) {
 		client.region = common.Region.fromRegionId(credentials.regionId.trim());
 	}
-	const endpoint = validateOciEndpoint(credentials.serviceEndpoint);
+	const endpoint = validateOciEndpoint(credentials.serviceEndpoint, credentials.regionId);
 	if (endpoint) {
 		client.endpoint = endpoint;
 	}
@@ -360,6 +376,7 @@ function getModelCatalogCache(key: string, now: number): CachedModelCatalog {
 	}
 
 	if (modelCatalogCache.size >= MAX_MODEL_CATALOG_CACHE_ENTRIES) {
+		// Keep memory bounded with insertion-order eviction; the short TTL makes LRU unnecessary.
 		const oldestEntry = modelCatalogCache.keys().next();
 		if (!oldestEntry.done) {
 			modelCatalogCache.delete(oldestEntry.value);
@@ -405,6 +422,7 @@ export async function getCachedOciGenAiModelCatalogPage(
 	}
 
 	if (cachedCatalog.pages.size >= MAX_MODEL_CATALOG_PAGES_PER_ENTRY) {
+		// Page tokens are also evicted in insertion order to bound a single catalog entry.
 		const oldestPage = cachedCatalog.pages.keys().next();
 		if (!oldestPage.done) {
 			cachedCatalog.pages.delete(oldestPage.value);
