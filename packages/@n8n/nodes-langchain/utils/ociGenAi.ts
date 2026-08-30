@@ -16,6 +16,8 @@ const OCI_COMPARTMENT_OCID_PATTERN =
 const MODEL_CATALOG_CACHE_TTL_MS = 60_000;
 const MAX_MODEL_CATALOG_CACHE_ENTRIES = 100;
 const MAX_MODEL_CATALOG_PAGES_PER_ENTRY = 20;
+export const OCI_INFERENCE_CLIENT_CACHE_TTL_MS = 60_000;
+const MAX_INFERENCE_CLIENT_CACHE_ENTRIES = 32;
 
 export interface OciGenAiCredentials {
 	authentication: 'apiKey' | 'instancePrincipal' | 'resourcePrincipal' | 'session';
@@ -121,7 +123,14 @@ type CachedModelCatalog = {
 	pages: Map<string, Promise<OciGenAiModelCatalogPage>>;
 };
 
+type CachedInferenceClient = {
+	// Expiration removes this client from reuse, but does not close it while workflows may still use it.
+	expiresAt: number;
+	clientPromise: Promise<genaiInference.GenerativeAiInferenceClient>;
+};
+
 const modelCatalogCache = new Map<string, CachedModelCatalog>();
+const inferenceClientCache = new Map<string, CachedInferenceClient>();
 
 export type OciGenAiSearchModel = {
 	id: string;
@@ -308,7 +317,7 @@ export async function getOciGenAiTenancyId(credentials: OciGenAiCredentials): Pr
 	return authenticationDetailsProvider.getTenantId();
 }
 
-export async function createOciGenAiClient(
+async function createOciGenAiClientInternal(
 	credentials: OciGenAiCredentials,
 ): Promise<genaiInference.GenerativeAiInferenceClient> {
 	const authenticationDetailsProvider = await getAuthenticationDetailsProvider(credentials);
@@ -325,6 +334,74 @@ export async function createOciGenAiClient(
 	return client;
 }
 
+function getInferenceClientCacheKey(credentials: OciGenAiCredentials): string {
+	// Private key and passphrase stay out of cache keys. Fingerprint changes identify key rotation;
+	// otherwise, the existing client can be reused only until this cache entry expires.
+	const authenticationIdentity = getOciAuthenticationIdentity(credentials);
+	const endpoint = validateOciEndpoint(credentials.serviceEndpoint, credentials.regionId) ?? '';
+
+	return JSON.stringify([
+		authenticationIdentity,
+		credentials.regionId.trim().toLowerCase(),
+		endpoint,
+	]);
+}
+
+function evictExpiredInferenceClients(now: number): void {
+	for (const [key, cachedClient] of inferenceClientCache) {
+		if (cachedClient.expiresAt <= now) {
+			// Existing workflows can still hold the client, so do not close it during eviction.
+			inferenceClientCache.delete(key);
+		}
+	}
+}
+
+async function getCachedOciGenAiClient(
+	credentials: OciGenAiCredentials,
+): Promise<genaiInference.GenerativeAiInferenceClient> {
+	const now = Date.now();
+	evictExpiredInferenceClients(now);
+
+	const key = getInferenceClientCacheKey(credentials);
+	const cachedClient = inferenceClientCache.get(key);
+	if (cachedClient) {
+		return await cachedClient.clientPromise;
+	}
+
+	if (inferenceClientCache.size >= MAX_INFERENCE_CLIENT_CACHE_ENTRIES) {
+		// Keep memory bounded with insertion-order eviction; the short TTL makes LRU unnecessary.
+		const oldestEntry = inferenceClientCache.keys().next();
+		if (!oldestEntry.done) {
+			inferenceClientCache.delete(oldestEntry.value);
+		}
+	}
+
+	const clientPromise = createOciGenAiClientInternal(credentials);
+	inferenceClientCache.set(key, {
+		expiresAt: now + OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
+		clientPromise,
+	});
+	void clientPromise.catch(() => {
+		// Do not retain failed authentication or client initialization attempts.
+		if (inferenceClientCache.get(key)?.clientPromise === clientPromise) {
+			inferenceClientCache.delete(key);
+		}
+	});
+
+	return await clientPromise;
+}
+
+export async function createOciGenAiClient(
+	credentials: OciGenAiCredentials,
+): Promise<genaiInference.GenerativeAiInferenceClient> {
+	return await getCachedOciGenAiClient(credentials);
+}
+
+export function clearOciGenAiCachesForTesting(): void {
+	inferenceClientCache.clear();
+	modelCatalogCache.clear();
+}
+
 export async function createOciGenAiModelClient(
 	credentials: OciGenAiCredentials,
 ): Promise<genai.GenerativeAiClient> {
@@ -338,7 +415,7 @@ export async function createOciGenAiModelClient(
 	return client;
 }
 
-function getModelCatalogCacheIdentity(credentials: OciGenAiCredentials): string {
+function getOciAuthenticationIdentity(credentials: OciGenAiCredentials): string {
 	switch (credentials.authentication) {
 		case 'apiKey':
 			return JSON.stringify(
@@ -408,7 +485,7 @@ export async function getCachedOciGenAiModelCatalogPage(
 ): Promise<OciGenAiModelCatalogPage> {
 	const normalizedVendor = vendor?.trim().toLowerCase() ?? '';
 	const cacheKey = JSON.stringify([
-		getModelCatalogCacheIdentity(credentials),
+		getOciAuthenticationIdentity(credentials),
 		credentials.regionId.trim().toLowerCase(),
 		compartmentId,
 		normalizedVendor,

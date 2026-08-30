@@ -28,6 +28,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - Retired on-demand models are omitted from the chat selector.
 - Embeddings use an explicit region-aware on-demand model catalog because OCI model discovery is not reliable for embedding availability in all regions.
 - Chat catalog pages are cached for 60 seconds. Cache entries are isolated by non-secret authentication identity, region, compartment, vendor, capability, and page token. The cache is bounded with insertion-order eviction, shares in-flight requests, and normalizes/sorts models once so typeahead only filters local search text.
+- Inference clients are cached for 60 seconds by non-secret authentication identity, region, and validated endpoint. This lets Agent tool-resume passes reuse the same OCI client even though n8n creates a fresh LangChain wrapper per pass. The 32-entry insertion-order cache shares in-flight creation and removes expired entries without closing clients that an in-flight workflow may still be using. A credential update with the same cache identity takes effect when the current entry expires.
 
 ## OCI Compatibility
 
@@ -40,7 +41,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - [x] Add OCI credentials, chat node, embeddings node, and Oracle icons.
 - [x] Add shared OCI client, validation, model catalog, and credential-test utilities.
 - [x] Add OCI request compatibility handling for tools and structured messages.
-- [x] Add input-validation, endpoint-validation, credential-test, catalog-cache, and node configuration unit coverage.
+- [x] Add input-validation, endpoint-validation, credential-test, catalog-cache, inference-client-cache, and node configuration unit coverage.
 - [ ] Replace the local `@oracle/langchain-oci` tarball with its published npm package.
 
 ## Verification

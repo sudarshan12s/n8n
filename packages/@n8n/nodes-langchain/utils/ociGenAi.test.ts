@@ -5,7 +5,10 @@ import type {
 } from 'n8n-workflow';
 import { models as ociModels } from 'oci-generativeai';
 
-const { listModels } = vi.hoisted(() => ({ listModels: vi.fn() }));
+const { listModels, generativeAiInferenceClient } = vi.hoisted(() => ({
+	listModels: vi.fn(),
+	generativeAiInferenceClient: vi.fn(),
+}));
 
 vi.mock('oci-common', () => ({
 	Region: {
@@ -36,9 +39,16 @@ vi.mock('oci-generativeai', () => ({
 	}),
 }));
 
+vi.mock('oci-generativeaiinference', () => ({
+	GenerativeAiInferenceClient: generativeAiInferenceClient,
+}));
+
 import {
+	clearOciGenAiCachesForTesting,
+	createOciGenAiClient,
 	getCachedOciGenAiModelCatalogPage,
 	getOciGenAiTenancyId,
+	OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
 	type OciGenAiCredentials,
 	testOciGenAiConnection,
 	validateOciCompartmentId,
@@ -65,6 +75,140 @@ const credential: ICredentialsDecrypted = {
 const credentialTestContext = {} as ICredentialTestFunctions;
 
 describe('OCI input validation', () => {
+	beforeEach(() => {
+		clearOciGenAiCachesForTesting();
+	});
+
+	describe('createOciGenAiClient', () => {
+		beforeEach(() => {
+			generativeAiInferenceClient.mockClear();
+		});
+
+		it('reuses a single inference client across concurrent model wrappers', async () => {
+			const credentials = {
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-concurrent-test',
+			};
+
+			const [firstClient, secondClient] = await Promise.all([
+				createOciGenAiClient(credentials),
+				createOciGenAiClient(credentials),
+			]);
+
+			expect(firstClient).toBe(secondClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(1);
+		});
+
+		it('reuses the cached inference client across sequential calls', async () => {
+			const credentials = {
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-sequential-test',
+			};
+
+			const firstClient = await createOciGenAiClient(credentials);
+			const secondClient = await createOciGenAiClient(credentials);
+
+			expect(secondClient).toBe(firstClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not include private key material in the inference client cache identity', async () => {
+			const credentials = {
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-identity-test',
+			};
+
+			const firstClient = await createOciGenAiClient(credentials);
+			const secondClient = await createOciGenAiClient({
+				...credentials,
+				privateKey: 'rotated-key',
+			});
+
+			expect(secondClient).toBe(firstClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(1);
+		});
+
+		it('does not reuse an inference client across different OCI users', async () => {
+			const firstClient = await createOciGenAiClient({
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-user-a',
+			});
+			const secondClient = await createOciGenAiClient({
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-user-b',
+			});
+
+			expect(secondClient).not.toBe(firstClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(2);
+		});
+
+		it('does not reuse an inference client after fingerprint rotation', async () => {
+			const firstClient = await createOciGenAiClient({
+				...ociCredentials,
+				fingerprint: 'inference-client-fingerprint-a',
+			});
+			const secondClient = await createOciGenAiClient({
+				...ociCredentials,
+				fingerprint: 'inference-client-fingerprint-b',
+			});
+
+			expect(secondClient).not.toBe(firstClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(2);
+		});
+
+		it('does not reuse an inference client across different regions and endpoints', async () => {
+			const firstClient = await createOciGenAiClient({
+				...ociCredentials,
+				serviceEndpoint: 'https://inference.generativeai.us-phoenix-1.oci.oraclecloud.com',
+			});
+			const secondClient = await createOciGenAiClient({
+				...ociCredentials,
+				regionId: 'us-gov-ashburn-1',
+				serviceEndpoint: 'https://inference.generativeai.us-gov-ashburn-1.oci.oraclegovcloud.com',
+			});
+
+			expect(secondClient).not.toBe(firstClient);
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(2);
+		});
+
+		it('creates a new inference client after cache expiration', async () => {
+			vi.useFakeTimers();
+			try {
+				const credentials = {
+					...ociCredentials,
+					userId: 'ocid1.user.oc1..inference-client-expiration-test',
+				};
+
+				const firstClient = await createOciGenAiClient(credentials);
+				vi.advanceTimersByTime(OCI_INFERENCE_CLIENT_CACHE_TTL_MS + 1);
+				const secondClient = await createOciGenAiClient(credentials);
+
+				expect(secondClient).not.toBe(firstClient);
+				expect(generativeAiInferenceClient).toHaveBeenCalledTimes(2);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it('retries client creation after a shared initialization failure', async () => {
+			generativeAiInferenceClient.mockImplementationOnce(() => {
+				throw new Error('initialization failed');
+			});
+			const credentials = {
+				...ociCredentials,
+				userId: 'ocid1.user.oc1..inference-client-failure-test',
+			};
+
+			await expect(
+				Promise.all([createOciGenAiClient(credentials), createOciGenAiClient(credentials)]),
+			).rejects.toThrow('initialization failed');
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(1);
+
+			await expect(createOciGenAiClient(credentials)).resolves.toBeDefined();
+			expect(generativeAiInferenceClient).toHaveBeenCalledTimes(2);
+		});
+	});
+
 	describe('validateOciModelId', () => {
 		it('accepts standard named models', () => {
 			expect(validateOciModelId('meta.llama-3.3-70b-instruct')).toBe('meta.llama-3.3-70b-instruct');
