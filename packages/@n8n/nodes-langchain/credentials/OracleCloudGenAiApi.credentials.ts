@@ -24,7 +24,7 @@ export class OracleCloudGenAiApi implements ICredentialType {
 					value: 'resourcePrincipal',
 				},
 				{
-					name: 'Session Token / Config File',
+					name: 'Session / Config File',
 					value: 'session',
 				},
 			],

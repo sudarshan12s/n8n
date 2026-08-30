@@ -31,6 +31,10 @@ describe('OracleCloudGenAiApi credential', () => {
 			'resourcePrincipal',
 			'session',
 		]);
+		expect(authentication?.options).toContainEqual({
+			name: 'Session / Config File',
+			value: 'session',
+		});
 
 		for (const name of ['tenancyId', 'userId', 'fingerprint', 'privateKey', 'passphrase']) {
 			expect(
@@ -50,6 +54,7 @@ describe('OracleCloudGenAiApi credential', () => {
 
 	it('uses safe defaults for region-derived endpoint configuration', () => {
 		expect(credential.properties.find((property) => property.name === 'regionId')).toMatchObject({
+			type: 'string',
 			default: 'us-chicago-1',
 			required: true,
 		});
