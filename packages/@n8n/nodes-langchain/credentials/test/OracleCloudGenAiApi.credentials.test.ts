@@ -48,6 +48,7 @@ describe('OracleCloudGenAiApi credential', () => {
 				credential.properties.find((property) => property.name === name)?.displayOptions,
 			).toEqual({
 				show: { authentication: ['session'] },
+				showOnDeployment: 'hosted',
 			});
 		}
 	});

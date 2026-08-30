@@ -104,9 +104,11 @@ export class OracleCloudGenAiApi implements ICredentialType {
 				show: {
 					authentication: ['session'],
 				},
+				showOnDeployment: 'hosted',
 			},
 			default: '~/.oci/config',
 			required: true,
+			description: 'Path to an OCI config file available to the n8n runtime.',
 		},
 		{
 			displayName: 'Config Profile',
@@ -116,6 +118,7 @@ export class OracleCloudGenAiApi implements ICredentialType {
 				show: {
 					authentication: ['session'],
 				},
+				showOnDeployment: 'hosted',
 			},
 			default: 'DEFAULT',
 			required: true,

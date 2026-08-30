@@ -317,6 +317,7 @@ export async function getOciGenAiTenancyId(credentials: OciGenAiCredentials): Pr
 	return authenticationDetailsProvider.getTenantId();
 }
 
+// Keep construction separate so the cache can share initialization across model wrappers.
 async function createOciGenAiClientInternal(
 	credentials: OciGenAiCredentials,
 ): Promise<genaiInference.GenerativeAiInferenceClient> {
@@ -334,6 +335,7 @@ async function createOciGenAiClientInternal(
 	return client;
 }
 
+// Cache only non-secret identity and routing settings; model and compartment are request-specific.
 function getInferenceClientCacheKey(credentials: OciGenAiCredentials): string {
 	// Private key and passphrase stay out of cache keys. Fingerprint changes identify key rotation;
 	// otherwise, the existing client can be reused only until this cache entry expires.
@@ -347,6 +349,7 @@ function getInferenceClientCacheKey(credentials: OciGenAiCredentials): string {
 	]);
 }
 
+// Expiry stops new callers from reusing a client without interrupting active workflows.
 function evictExpiredInferenceClients(now: number): void {
 	for (const [key, cachedClient] of inferenceClientCache) {
 		if (cachedClient.expiresAt <= now) {
@@ -356,6 +359,7 @@ function evictExpiredInferenceClients(now: number): void {
 	}
 }
 
+// Agent tool calls rebuild LangChain wrappers, so reuse OCI client initialization across wrappers.
 async function getCachedOciGenAiClient(
 	credentials: OciGenAiCredentials,
 ): Promise<genaiInference.GenerativeAiInferenceClient> {
@@ -391,12 +395,14 @@ async function getCachedOciGenAiClient(
 	return await clientPromise;
 }
 
+// Preserve the shared client factory used by both OCI Chat and Embeddings nodes.
 export async function createOciGenAiClient(
 	credentials: OciGenAiCredentials,
 ): Promise<genaiInference.GenerativeAiInferenceClient> {
 	return await getCachedOciGenAiClient(credentials);
 }
 
+// Reset module-level caches so unit tests do not depend on execution order.
 export function clearOciGenAiCachesForTesting(): void {
 	inferenceClientCache.clear();
 	modelCatalogCache.clear();
@@ -415,6 +421,7 @@ export async function createOciGenAiModelClient(
 	return client;
 }
 
+// Both OCI caches need the same non-secret identity boundary.
 function getOciAuthenticationIdentity(credentials: OciGenAiCredentials): string {
 	switch (credentials.authentication) {
 		case 'apiKey':
@@ -437,6 +444,7 @@ function getOciAuthenticationIdentity(credentials: OciGenAiCredentials): string 
 	}
 }
 
+// Expire catalog entries so dropdown data stays current without unbounded retention.
 function evictExpiredModelCatalogs(now: number): void {
 	for (const [key, catalog] of modelCatalogCache) {
 		if (catalog.expiresAt <= now) {
@@ -445,6 +453,7 @@ function evictExpiredModelCatalogs(now: number): void {
 	}
 }
 
+// Share a short-lived catalog across typeahead requests for the same OCI scope.
 function getModelCatalogCache(key: string, now: number): CachedModelCatalog {
 	evictExpiredModelCatalogs(now);
 
@@ -469,6 +478,7 @@ function getModelCatalogCache(key: string, now: number): CachedModelCatalog {
 	return catalog;
 }
 
+// Cache model pages because searchable selectors call this once per typed character.
 export async function getCachedOciGenAiModelCatalogPage(
 	credentials: OciGenAiCredentials,
 	{
