@@ -19,7 +19,6 @@ import {
 	createOciGenAiClient,
 	getOnDemandEmbeddingModels,
 	isOciGenAiCredentials,
-	testOciGenAiConnection,
 	validateOciCompartmentId,
 	validateOciModelId,
 } from '../../../utils/ociGenAi';
@@ -177,7 +176,8 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 1,
 			},
-			description: 'Maximum number of embedding requests that can run concurrently',
+			description:
+				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
 		},
 		{
 			displayName: 'Output Dimensions',
@@ -187,7 +187,8 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 1,
 			},
-			description: 'Optional output-vector dimension supported by compatible embedding models',
+			description:
+				'Number of dimensions in the returned embedding vector. The selected embedding model must support this value. Changing it can require a vector store with matching dimensions.',
 		},
 		{
 			displayName: 'Truncate',
@@ -208,7 +209,8 @@ const optionsProperty: INodeProperties = {
 				},
 			],
 			default: 'START',
-			description: 'How OCI should handle input that exceeds the model token limit',
+			description:
+				'Controls whether OCI truncates input that exceeds the model token limit. Start removes tokens from the beginning. End removes tokens from the end. None returns an error for oversized input.',
 		},
 	],
 };
@@ -241,7 +243,6 @@ export class EmbeddingsOciGenAi implements INodeType {
 			{
 				name: 'ociGenAiApi',
 				required: true,
-				testedBy: 'testConnection',
 			},
 		],
 		inputs: [],
@@ -257,9 +258,6 @@ export class EmbeddingsOciGenAi implements INodeType {
 	};
 
 	methods = {
-		credentialTest: {
-			testConnection: testOciGenAiConnection,
-		},
 		listSearch: {
 			async searchEmbeddingModels(
 				this: ILoadOptionsFunctions,
@@ -292,6 +290,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 		},
 	};
 
+	// Build the LangChain embeddings model that n8n supplies to connected AI nodes.
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		const credentials = await this.getCredentials('ociGenAiApi');
 		if (!isOciGenAiCredentials(credentials)) {

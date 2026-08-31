@@ -18,7 +18,6 @@ vi.mock('../../../../utils/ociGenAi', () => ({
 	createOciGenAiClient: createClient,
 	getOnDemandEmbeddingModels: () => [],
 	isOciGenAiCredentials: () => true,
-	testOciGenAiConnection: vi.fn(),
 	validateOciCompartmentId: (value: string) => {
 		if (!value.startsWith('ocid1.compartment.')) throw new Error('Invalid OCI Compartment OCID');
 		return value;
@@ -66,6 +65,50 @@ describe('EmbeddingsOciGenAi', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		createClient.mockResolvedValue({ client: 'inference' });
+	});
+
+	it('does not run a credential test when the credential editor opens', () => {
+		const node = new EmbeddingsOciGenAi();
+
+		expect(node.description.credentials).toEqual([{ name: 'ociGenAiApi', required: true }]);
+		expect(node.methods).not.toHaveProperty('credentialTest');
+	});
+
+	it('explains how each truncation option handles oversized input', () => {
+		const node = new EmbeddingsOciGenAi();
+		const options = node.description.properties.find((property) => property.name === 'options');
+		const truncate = options?.options?.find((property) => property.name === 'truncate');
+
+		expect(truncate).toMatchObject({
+			default: 'START',
+			description:
+				'Controls whether OCI truncates input that exceeds the model token limit. Start removes tokens from the beginning. End removes tokens from the end. None returns an error for oversized input.',
+		});
+	});
+
+	it('explains output dimension compatibility with the selected model and vector store', () => {
+		const node = new EmbeddingsOciGenAi();
+		const options = node.description.properties.find((property) => property.name === 'options');
+		const outputDimensions = options?.options?.find(
+			(property) => property.name === 'outputDimensions',
+		);
+
+		expect(outputDimensions).toMatchObject({
+			default: 1024,
+			description:
+				'Number of dimensions in the returned embedding vector. The selected embedding model must support this value. Changing it can require a vector store with matching dimensions.',
+		});
+	});
+
+	it('explains the maximum concurrency throughput tradeoff', () => {
+		const node = new EmbeddingsOciGenAi();
+		const options = node.description.properties.find((property) => property.name === 'options');
+		const maxConcurrency = options?.options?.find((property) => property.name === 'maxConcurrency');
+
+		expect(maxConcurrency).toMatchObject({
+			description:
+				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
+		});
 	});
 
 	it('creates OCI embeddings with the selected model and options', async () => {

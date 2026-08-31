@@ -16,7 +16,6 @@ vi.mock('../../../../utils/ociGenAi', () => ({
 	createOciGenAiClient: createClient,
 	getCachedOciGenAiModelCatalogPage: getCachedCatalog,
 	isOciGenAiCredentials: () => true,
-	testOciGenAiConnection: vi.fn(),
 	validateOciCompartmentId: (value: string) => {
 		if (!value.startsWith('ocid1.compartment.')) throw new Error('Invalid OCI Compartment OCID');
 		return value;
@@ -63,6 +62,23 @@ describe('LmChatOciGenAi', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		createClient.mockResolvedValue({ client: 'inference' });
+	});
+
+	it('does not run a credential test when the credential editor opens', () => {
+		const node = new LmChatOciGenAi();
+
+		expect(node.description.credentials).toEqual([{ name: 'ociGenAiApi', required: true }]);
+		expect(node.methods).not.toHaveProperty('credentialTest');
+	});
+
+	it('describes the seed option as model-dependent reproducibility', () => {
+		const node = new LmChatOciGenAi();
+		const options = node.description.properties.find((property) => property.name === 'options');
+		const seed = options?.options?.find((property) => property.name === 'seed');
+
+		expect(seed).toMatchObject({
+			description: 'Seed used for reproducible generation where supported by the selected model',
+		});
 	});
 
 	it('creates one OCI chat model with the selected on-demand model and options', async () => {

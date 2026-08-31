@@ -19,7 +19,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - API-key private keys accept JSON-escaped line breaks and are normalized before being passed to the OCI SDK.
 - Model and compartment IDs are validated before they reach OCI.
 - The optional advanced inference endpoint must be HTTPS and exactly match the configured OCI region and its realm as resolved by the OCI SDK. It cannot contain user credentials, ports, paths, query parameters, or fragments. Leaving it empty uses the SDK-derived endpoint.
-- A node-level credential test lists one model in the authenticated tenancy. Its failure response is generic so provider errors cannot expose credential material.
+- OCI credentials do not run an automatic connection test. The model and compartment configured on each node determine whether inference is authorized.
 
 ## Model Selection
 
@@ -39,9 +39,9 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 ## Implementation TODO
 
 - [x] Add OCI credentials, chat node, embeddings node, and Oracle icons.
-- [x] Add shared OCI client, validation, model catalog, and credential-test utilities.
+- [x] Add shared OCI client, validation, and model-catalog utilities.
 - [x] Add OCI request compatibility handling for tools and structured messages.
-- [x] Add input-validation, endpoint-validation, credential-test, catalog-cache, inference-client-cache, and node configuration unit coverage.
+- [x] Add input-validation, endpoint-validation, catalog-cache, inference-client-cache, and node configuration unit coverage.
 - [ ] Replace the local `@oracle/langchain-oci` tarball with its published npm package.
 
 ## Verification

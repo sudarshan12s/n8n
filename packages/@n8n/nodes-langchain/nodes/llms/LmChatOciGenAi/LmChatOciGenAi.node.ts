@@ -20,7 +20,6 @@ import {
 	createOciGenAiClient,
 	getCachedOciGenAiModelCatalogPage,
 	isOciGenAiCredentials,
-	testOciGenAiConnection,
 	validateOciCompartmentId,
 	validateOciModelId,
 } from '../../../utils/ociGenAi';
@@ -320,8 +319,7 @@ const optionsProperty: INodeProperties = {
 			typeOptions: {
 				minValue: 0,
 			},
-			description:
-				'Optional seed for deterministic generation where supported by the selected model',
+			description: 'Seed used for reproducible generation where supported by the selected model',
 		},
 	],
 };
@@ -355,7 +353,6 @@ export class LmChatOciGenAi implements INodeType {
 			{
 				name: 'ociGenAiApi',
 				required: true,
-				testedBy: 'testConnection',
 			},
 		],
 		inputs: [],
@@ -372,9 +369,6 @@ export class LmChatOciGenAi implements INodeType {
 	};
 
 	methods = {
-		credentialTest: {
-			testConnection: testOciGenAiConnection,
-		},
 		listSearch: {
 			async searchChatModels(
 				this: ILoadOptionsFunctions,
@@ -424,6 +418,7 @@ export class LmChatOciGenAi implements INodeType {
 		},
 	};
 
+	// Build the LangChain chat model that n8n supplies to connected AI nodes.
 	async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
 		const credentials = await this.getCredentials('ociGenAiApi');
 		if (!isOciGenAiCredentials(credentials)) {

@@ -1,8 +1,3 @@
-import type {
-	ICredentialDataDecryptedObject,
-	ICredentialsDecrypted,
-	ICredentialTestFunctions,
-} from 'n8n-workflow';
 import { models as ociModels } from 'oci-generativeai';
 
 const { listModels, generativeAiInferenceClient } = vi.hoisted(() => ({
@@ -47,10 +42,8 @@ import {
 	clearOciGenAiCachesForTesting,
 	createOciGenAiClient,
 	getCachedOciGenAiModelCatalogPage,
-	getOciGenAiTenancyId,
 	OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
 	type OciGenAiCredentials,
-	testOciGenAiConnection,
 	validateOciCompartmentId,
 	validateOciEndpoint,
 	validateOciModelId,
@@ -64,15 +57,6 @@ const ociCredentials: OciGenAiCredentials = {
 	fingerprint: 'test',
 	privateKey: 'test-key',
 };
-
-const credential: ICredentialsDecrypted = {
-	id: 'credential-id',
-	name: 'OCI Generative AI account',
-	type: 'ociGenAiApi',
-	data: ociCredentials as unknown as ICredentialDataDecryptedObject,
-};
-
-const credentialTestContext = {} as ICredentialTestFunctions;
 
 describe('OCI input validation', () => {
 	beforeEach(() => {
@@ -307,39 +291,6 @@ describe('OCI input validation', () => {
 					'us-gov-ashburn-1',
 				),
 			).toThrow();
-		});
-	});
-
-	describe('testOciGenAiConnection', () => {
-		beforeEach(() => {
-			listModels.mockReset();
-		});
-
-		it('lists a model in the authenticated tenancy', async () => {
-			listModels.mockResolvedValue({ items: [] });
-			await expect(getOciGenAiTenancyId(ociCredentials)).resolves.toBe('ocid1.tenancy.oc1..test');
-
-			await expect(testOciGenAiConnection.call(credentialTestContext, credential)).resolves.toEqual(
-				{
-					status: 'OK',
-					message: 'Connection successful',
-				},
-			);
-			expect(listModels).toHaveBeenCalledWith({
-				compartmentId: 'ocid1.tenancy.oc1..test',
-				limit: 1,
-			});
-		});
-
-		it('does not expose integration errors', async () => {
-			listModels.mockRejectedValue(new Error('private key test-key was rejected'));
-
-			await expect(testOciGenAiConnection.call(credentialTestContext, credential)).resolves.toEqual(
-				{
-					status: 'Error',
-					message: 'Unable to connect. Check your OCI credentials and configuration.',
-				},
-			);
 		});
 	});
 

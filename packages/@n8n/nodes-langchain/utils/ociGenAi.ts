@@ -1,8 +1,4 @@
-import {
-	UserError,
-	type ICredentialDataDecryptedObject,
-	type ICredentialTestFunction,
-} from 'n8n-workflow';
+import { UserError, type ICredentialDataDecryptedObject } from 'n8n-workflow';
 import * as common from 'oci-common';
 import * as genai from 'oci-generativeai';
 import * as genaiInference from 'oci-generativeaiinference';
@@ -303,20 +299,6 @@ async function getAuthenticationDetailsProvider(
 	}
 }
 
-function hasTenantId(
-	provider: common.AuthenticationDetailsProvider,
-): provider is common.AuthenticationDetailsProvider & { getTenantId(): string } {
-	return 'getTenantId' in provider && typeof provider.getTenantId === 'function';
-}
-
-export async function getOciGenAiTenancyId(credentials: OciGenAiCredentials): Promise<string> {
-	const authenticationDetailsProvider = await getAuthenticationDetailsProvider(credentials);
-	if (!hasTenantId(authenticationDetailsProvider)) {
-		throw new UserError('OCI authentication provider does not expose a tenancy ID');
-	}
-	return authenticationDetailsProvider.getTenantId();
-}
-
 // Keep construction separate so the cache can share initialization across model wrappers.
 async function createOciGenAiClientInternal(
 	credentials: OciGenAiCredentials,
@@ -542,31 +524,3 @@ export async function getCachedOciGenAiModelCatalogPage(
 	cachedCatalog.pages.set(pageKey, page);
 	return await page;
 }
-
-export const testOciGenAiConnection: ICredentialTestFunction = async (credentialData) => {
-	if (!credentialData.data || !isOciGenAiCredentials(credentialData.data)) {
-		return {
-			status: 'Error',
-			message: 'Invalid OCI Generative AI credentials',
-		};
-	}
-
-	try {
-		const [client, compartmentId] = await Promise.all([
-			createOciGenAiModelClient(credentialData.data),
-			getOciGenAiTenancyId(credentialData.data),
-		]);
-		await client.listModels({ compartmentId, limit: 1 });
-
-		return {
-			status: 'OK',
-			message: 'Connection successful',
-		};
-	} catch {
-		// OCI errors can echo request details, so do not persist the raw integration message.
-		return {
-			status: 'Error',
-			message: 'Unable to connect. Check your OCI credentials and configuration.',
-		};
-	}
-};
