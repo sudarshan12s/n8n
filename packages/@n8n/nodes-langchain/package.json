@@ -292,7 +292,7 @@
     "oci-common": "^2.99.0",
     "oci-generativeai": "^2.99.0",
     "oci-generativeaiinference": "^2.99.0",
-    "@oracle/langchain-oci": "file:/Users/sudarshansoma/Downloads/oracle-langchain-oci-0.0.1.tgz",
+    "@oracle/langchain-oci": "0.0.1",
     "@oracle/langchain-oracledb": "0.2.0",
     "@pinecone-database/pinecone": "catalog:",
     "@qdrant/js-client-rest": "catalog:",
