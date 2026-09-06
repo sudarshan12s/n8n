@@ -46,6 +46,18 @@ function getCompartmentId(): string {
 	return requiredEnv('OCI_GENAI_COMPARTMENT_OCID');
 }
 
+function getIdleObservationDurationMs(name: string, defaultSeconds: number): number {
+	const configuredSeconds = process.env[name];
+	if (configuredSeconds === undefined) return defaultSeconds * 1_000;
+
+	const seconds = Number(configuredSeconds);
+	if (!Number.isFinite(seconds) || seconds < 0) {
+		throw new Error(`${name} must be a non-negative number of seconds`);
+	}
+
+	return seconds * 1_000;
+}
+
 function getCommandOutput(command: string, args: string[]): string {
 	try {
 		return execFileSync(command, args, {
@@ -167,7 +179,7 @@ function isInvokableChatModel(value: unknown): value is InvokableChatModel {
 	);
 }
 
-function printOciConnections(ociIp: string, label: string): void {
+function printOciConnections(ociIp: string, label: string): string[] {
 	const connections = getEstablishedTcpConnections();
 
 	const ociConnections = connections.filter((connection) => connection.includes(ociIp));
@@ -179,12 +191,73 @@ function printOciConnections(ociIp: string, label: string): void {
 	for (const connection of ociConnections) {
 		console.log(`[OCI INT TEST] ${connection}`);
 	}
+
+	return ociConnections;
+}
+
+function getLocalConnectionEndpoint(connection: string): string | undefined {
+	const fields = connection.split(/\s+/);
+	const tcpFieldIndex = fields.indexOf('TCP');
+	const endpoint = tcpFieldIndex === -1 ? undefined : fields[tcpFieldIndex + 1];
+	return endpoint?.split('->')[0];
+}
+
+function printConnectionReuse(
+	previousConnections: string[],
+	currentConnections: string[],
+	label: string,
+): void {
+	const previousEndpoints = new Set(
+		previousConnections
+			.map(getLocalConnectionEndpoint)
+			.filter((endpoint) => endpoint !== undefined),
+	);
+	const currentEndpoints = new Set(
+		currentConnections.map(getLocalConnectionEndpoint).filter((endpoint) => endpoint !== undefined),
+	);
+	const reused = [...currentEndpoints].filter((endpoint) => previousEndpoints.has(endpoint));
+	const newConnections = [...currentEndpoints].filter(
+		(endpoint) => !previousEndpoints.has(endpoint),
+	);
+	const retired = [...previousEndpoints].filter((endpoint) => !currentEndpoints.has(endpoint));
+
+	console.log(`\n[OCI INT TEST] ${label}`);
+	console.log(`[OCI INT TEST] Reused local connections: ${reused.length}`);
+	console.log(`[OCI INT TEST] New local connections: ${newConnections.length}`);
+	console.log(`[OCI INT TEST] Retired local connections: ${retired.length}`);
+}
+
+async function waitForIdleObservation(durationMs: number): Promise<void> {
+	console.log(
+		`[OCI INT TEST] Waiting ${durationMs / 1_000} seconds for idle connection behavior...`,
+	);
+	await new Promise<void>((resolve) => {
+		setTimeout(resolve, durationMs);
+	});
+}
+
+async function runConcurrentBatch(
+	models: InvokableChatModel[],
+	batchNumber: number,
+): Promise<Array<{ content: unknown }>> {
+	return await Promise.all(
+		models.map(async (chatModel, index) => {
+			return await chatModel.invoke([
+				new HumanMessage(`Reply with exactly: batch ${batchNumber}, wrapper ${index + 1} passed`),
+			]);
+		}),
+	);
 }
 
 async function run(): Promise<void> {
 	const credentials = getCredentials();
 	const model = getModel();
 	const compartmentId = getCompartmentId();
+	const firstIdleObservationMs = getIdleObservationDurationMs('OCI_SOCKET_IDLE_SECONDS', 5);
+	const extendedIdleObservationMs = getIdleObservationDurationMs(
+		'OCI_SOCKET_EXTENDED_IDLE_SECONDS',
+		25,
+	);
 	const ociIp = await getOciEndpointIp(credentials);
 	const chatNode = new LmChatOciGenAi();
 
@@ -271,27 +344,70 @@ async function run(): Promise<void> {
 		printOciConnections(ociIp, 'after all chat-node requests');
 	}
 
-	// Run all wrappers concurrently to observe how the OCI HTTP transport scales connections.
-	const concurrentResponses = await Promise.all(
-		models.map(async (chatModel, index) => {
-			return await chatModel.invoke([
-				new HumanMessage(`Reply with exactly: concurrent wrapper ${index + 1} passed`),
-			]);
-		}),
-	);
+	// Observe connection-pool behavior across repeated concurrent batches.
+	const concurrentResponses = await runConcurrentBatch(models, 1);
 
-	console.log(
-		`[OCI INT TEST] Completed ${concurrentResponses.length} concurrent chat-node requests`,
-	);
+	console.log(`[OCI INT TEST] Completed ${concurrentResponses.length} concurrent batch 1 requests`);
 	printSocketSnapshot('after concurrent chat-node requests');
+	let firstBatchConnections: string[] = [];
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'after concurrent chat-node requests');
+		firstBatchConnections = printOciConnections(ociIp, 'after concurrent batch 1');
+	}
+
+	await waitForIdleObservation(firstIdleObservationMs);
+	if (ociIp) {
+		const idleConnections = printOciConnections(
+			ociIp,
+			`${firstIdleObservationMs / 1_000} seconds after concurrent batch 1`,
+		);
+		printConnectionReuse(
+			firstBatchConnections,
+			idleConnections,
+			`idle behavior after ${firstIdleObservationMs / 1_000} seconds`,
+		);
+	}
+
+	await waitForIdleObservation(extendedIdleObservationMs);
+	let idleConnectionsAfterObservation: string[] = [];
+	if (ociIp) {
+		idleConnectionsAfterObservation = printOciConnections(
+			ociIp,
+			`${(firstIdleObservationMs + extendedIdleObservationMs) / 1_000} seconds after concurrent batch 1`,
+		);
+		printConnectionReuse(
+			firstBatchConnections,
+			idleConnectionsAfterObservation,
+			`idle behavior after ${(firstIdleObservationMs + extendedIdleObservationMs) / 1_000} seconds`,
+		);
+	}
+
+	const secondBatchResponses = await runConcurrentBatch(models, 2);
+	let secondBatchConnections: string[] = [];
+	if (ociIp) {
+		secondBatchConnections = printOciConnections(ociIp, 'after concurrent batch 2');
+		printConnectionReuse(
+			idleConnectionsAfterObservation,
+			secondBatchConnections,
+			'connection reuse from idle state to batch 2',
+		);
+	}
+
+	const thirdBatchResponses = await runConcurrentBatch(models, 3);
+	if (ociIp) {
+		const thirdBatchConnections = printOciConnections(ociIp, 'after concurrent batch 3');
+		printConnectionReuse(
+			secondBatchConnections,
+			thirdBatchConnections,
+			'connection reuse from batch 2 to batch 3',
+		);
 	}
 
 	assert.ok(firstResponse);
 	assert.ok(secondResponseSameWrapper);
 	assert.equal(concurrentResponses.length, wrapperCount);
+	assert.equal(secondBatchResponses.length, wrapperCount);
+	assert.equal(thirdBatchResponses.length, wrapperCount);
 }
 
 run().catch((error: unknown) => {

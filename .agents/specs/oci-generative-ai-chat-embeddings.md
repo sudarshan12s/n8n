@@ -37,7 +37,8 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - A wrapper's `close()` does not close an injected client. n8n does not currently invoke wrapper `close()` at the end of every workflow. Cache expiry removes the cache reference without closing the client so active workflows are not interrupted; process shutdown provides final operating-system socket cleanup.
 - Socket observations from the local diagnostic showed one cached OCI client serving eleven chat wrappers. Sequential requests reused one OCI TCP connection. Ten concurrent requests opened ten TCP connections to the same OCI endpoint. This is expected connection-pool concurrency, not evidence that ten SDK clients were created.
 - Client lifetime and connection lifetime are separate. A single SDK client can own a transport pool with several simultaneous connections. Do not serialize OCI requests merely to reduce socket count, because that would reduce throughput and increase latency.
-- Idle connection retirement and reuse across a second concurrent batch have not yet been established. The diagnostic records those observations instead of asserting a fixed connection count.
+- The local diagnostic observed ten connections after its first ten-request concurrent batch and zero after five seconds idle. A second batch then opened ten new connections because the pool was empty. An immediate third batch reused all ten of the second batch's local endpoints. This shows idle retirement and active-pool reuse for the tested OCI transport.
+- The diagnostic records socket observations instead of asserting a fixed connection count. Its default timings are five and 30 seconds; `OCI_SOCKET_IDLE_SECONDS` and `OCI_SOCKET_EXTENDED_IDLE_SECONDS` can shorten or extend those local observations.
 
 ## OCI Compatibility
 
@@ -52,7 +53,7 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - [x] Add OCI request compatibility handling for tools and structured messages.
 - [x] Add input-validation, endpoint-validation, catalog-cache, inference-client-cache, and node configuration unit coverage.
 - [x] Add a local OCI socket diagnostic that exercises repeated requests on one wrapper, new wrappers sharing the inference-client cache, and concurrent requests.
-- [ ] Observe idle socket behavior and connection reuse across repeated concurrent batches with the local OCI diagnostic.
+- [x] Observe idle socket behavior and connection reuse across repeated concurrent batches with the local OCI diagnostic.
 - [ ] Replace the local `@oracle/langchain-oci` tarball with its published npm package.
 
 ## Verification
@@ -75,4 +76,4 @@ pnpm lint
 4. On the Embeddings node, select an on-demand model available in the selected region. Connect it to a vector store or embedding consumer and confirm it creates vectors.
 5. For dedicated serving, select **Dedicated** and enter an endpoint OCID. Confirm leaving the endpoint ID empty produces the expected validation error.
 6. Optionally set the advanced endpoint to the exact inference host for the selected region and realm. Confirm a mismatched realm, non-HTTPS URL, path, port, query, fragment, or credentials is rejected.
-7. To inspect OCI client and socket behavior locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm test:oci-sockets`. Review the sequential, same-wrapper, new-wrapper, and concurrent socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. A follow-up run should observe idle cleanup and compare local ports across repeated concurrent batches.
+7. To inspect OCI client and socket behavior locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm test:oci-sockets`. Review the sequential, same-wrapper, new-wrapper, idle, and three concurrent-batch socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. The output compares reused, new, and retired local endpoints. Set `OCI_SOCKET_IDLE_SECONDS` or `OCI_SOCKET_EXTENDED_IDLE_SECONDS` to adjust the observation intervals.
