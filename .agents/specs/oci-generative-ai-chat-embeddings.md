@@ -40,6 +40,34 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - The local diagnostic observed ten connections after its first ten-request concurrent batch and zero after five seconds idle. A second batch then opened ten new connections because the pool was empty. An immediate third batch reused all ten of the second batch's local endpoints. This shows idle retirement and active-pool reuse for the tested OCI transport.
 - The diagnostic records socket observations instead of asserting a fixed connection count. Its default timings are five and 30 seconds; `OCI_SOCKET_IDLE_SECONDS` and `OCI_SOCKET_EXTENDED_IDLE_SECONDS` can shorten or extend those local observations.
 
+```mermaid
+flowchart LR
+	W1[Chat wrapper 1] --> C[Cached GenerativeAiInferenceClient]
+	W2[Chat wrapper 2] --> C
+	WN[Additional chat wrappers] --> C
+	C --> H[OCI HTTP transport]
+	H --> S[Sequential traffic: one connection]
+	H --> P[Concurrent traffic: connection pool]
+	P --> T[One or more OCI TCP connections]
+```
+
+```mermaid
+sequenceDiagram
+	participant B1 as Concurrent batch 1
+	participant P as OCI HTTP transport
+	participant O as OCI endpoint
+	participant B2 as Concurrent batch 2
+	participant B3 as Concurrent batch 3
+
+	B1->>P: 10 concurrent requests
+	P->>O: Open 10 connections
+	Note over P,O: Five seconds idle: all observed connections retire
+	B2->>P: 10 concurrent requests
+	P->>O: Open 10 new connections
+	B3->>P: 10 concurrent requests
+	P->>O: Reuse the 10 Batch 2 connections
+```
+
 ## OCI Compatibility
 
 - Tool schemas remove `$schema`, which OCI function declarations do not accept.
