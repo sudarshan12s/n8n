@@ -36,6 +36,7 @@
     "lint:fix": "eslint nodes credentials utils --fix",
     "watch": "tsc-watch -p tsconfig.build.json --onSuccess \"node ./scripts/post-build.js\"",
     "test": "vitest run",
+		"test:oci-sockets": "tsx nodes/llms/LmChatOciGenAi/test/checkocisockets.ts",
     "test:unit": "vitest run",
     "test:dev": "vitest --silent=false"
   },
