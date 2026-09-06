@@ -220,6 +220,22 @@ async function run(): Promise<void> {
 		printOciConnections(ociIp, 'after first chat-node request');
 	}
 
+	// Reuse the same wrapper after its OCI SDK client has been initialized.
+	const secondResponseSameWrapper = await firstModel.invoke([
+		new HumanMessage('Reply with exactly: same wrapper reuse passed'),
+	]);
+
+	console.log(
+		'[OCI INT TEST] Second response using same wrapper:',
+		secondResponseSameWrapper.content,
+	);
+	printSocketSnapshot('after second request using same chat wrapper');
+
+	if (ociIp) {
+		printOciConnections(ociIp, 'after second request using same chat wrapper');
+	}
+
+	// New wrappers begin uninitialized but receive the n8n-cached OCI inference client.
 	const wrapperCount = 10;
 	const models = [] as Array<typeof firstModel>;
 
@@ -255,7 +271,27 @@ async function run(): Promise<void> {
 		printOciConnections(ociIp, 'after all chat-node requests');
 	}
 
+	// Run all wrappers concurrently to observe how the OCI HTTP transport scales connections.
+	const concurrentResponses = await Promise.all(
+		models.map(async (chatModel, index) => {
+			return await chatModel.invoke([
+				new HumanMessage(`Reply with exactly: concurrent wrapper ${index + 1} passed`),
+			]);
+		}),
+	);
+
+	console.log(
+		`[OCI INT TEST] Completed ${concurrentResponses.length} concurrent chat-node requests`,
+	);
+	printSocketSnapshot('after concurrent chat-node requests');
+
+	if (ociIp) {
+		printOciConnections(ociIp, 'after concurrent chat-node requests');
+	}
+
 	assert.ok(firstResponse);
+	assert.ok(secondResponseSameWrapper);
+	assert.equal(concurrentResponses.length, wrapperCount);
 }
 
 run().catch((error: unknown) => {
