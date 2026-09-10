@@ -1,12 +1,18 @@
 import { logWrapper } from '@n8n/ai-utilities';
 import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
-import type { INode, ISupplyDataFunctions } from 'n8n-workflow';
+import type { INode, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
 import type { Mocked } from 'vitest';
 
 const { createClient } = vi.hoisted(() => ({ createClient: vi.fn() }));
 
 vi.mock('@n8n/ai-utilities', () => ({
+	getConnectionHintNoticeField: vi.fn(() => ({
+		displayName: 'Connection hint',
+		name: 'connectionHint',
+		type: 'notice',
+		default: '',
+	})),
 	logWrapper: vi.fn((instance: unknown) => instance),
 }));
 
@@ -80,9 +86,9 @@ describe('EmbeddingsOciGenAi', () => {
 		const truncate = options?.options?.find((property) => property.name === 'truncate');
 
 		expect(truncate).toMatchObject({
-			default: 'START',
+			default: 'NONE',
 			description:
-				'Controls whether OCI truncates input that exceeds the model token limit. Start removes tokens from the beginning. End removes tokens from the end. None returns an error for oversized input.',
+				'Controls how OCI handles input that exceeds the model token limit. None returns an error. Start removes tokens from the beginning. End removes tokens from the end.',
 		});
 	});
 
@@ -91,12 +97,21 @@ describe('EmbeddingsOciGenAi', () => {
 		const options = node.description.properties.find((property) => property.name === 'options');
 		const outputDimensions = options?.options?.find(
 			(property) => property.name === 'outputDimensions',
-		);
+		) as INodeProperties | undefined;
 
 		expect(outputDimensions).toMatchObject({
-			default: 1024,
+			default: 1536,
 			description:
-				'Number of dimensions in the returned embedding vector. The selected embedding model must support this value. Changing it can require a vector store with matching dimensions.',
+				'Number of dimensions in the returned embedding vector. Cohere Embed 4 supports 256, 512, 1024, and 1536. Changing this value can require a vector store with matching dimensions.',
+		});
+		expect(outputDimensions?.options).toEqual([
+			{ name: '256', value: 256 },
+			{ name: '512', value: 512 },
+			{ name: '1024', value: 1024 },
+			{ name: '1536', value: 1536 },
+		]);
+		expect(outputDimensions?.displayOptions).toEqual({
+			show: { '/model.value': ['cohere.embed-v4.0'] },
 		});
 	});
 
@@ -144,6 +159,40 @@ describe('EmbeddingsOciGenAi', () => {
 
 		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
 			'Dedicated Endpoint ID is required',
+		);
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
+	it('rejects output dimensions for an on-demand model that does not support them', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') return 'cohere.embed-english-v3.0';
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'onDemand';
+			if (name === 'options') return { outputDimensions: 1024 };
+			return '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
+			'Output Dimensions is supported only by Cohere Embed 4',
+		);
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
+	it('rejects unsupported output dimensions for Cohere Embed 4', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') return 'cohere.embed-v4.0';
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'onDemand';
+			if (name === 'options') return { outputDimensions: 768 };
+			return '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
+			'Output Dimensions for Cohere Embed 4 must be 256, 512, 1024, or 1536.',
 		);
 		expect(createClient).not.toHaveBeenCalled();
 	});

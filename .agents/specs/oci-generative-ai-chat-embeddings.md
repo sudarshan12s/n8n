@@ -26,7 +26,10 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - Chat-model discovery calls OCI's management API with `Chat` capability and optional vendor filters.
 - Management model OCIDs are converted to provider model IDs when OCI inference requires a provider ID.
 - Retired on-demand models are omitted from the chat selector.
-- Embeddings use an explicit region-aware on-demand model catalog because OCI model discovery is not reliable for embedding availability in all regions.
+- Embeddings use a verified, region-aware on-demand model catalog rather than OCI management discovery. The management API does not reliably distinguish on-demand availability by region. Keep the catalog aligned with OCI Models by Region; manual model ID entry supports newly released models. Available Embed 3 entries are labelled deprecated.
+- In dedicated Chat and Embeddings mode, the endpoint identifies the hosted model. The on-demand model selector is hidden and is not read or validated.
+- For `cohere.embed-v4.0`, Output Dimensions is a model-specific selector with 256, 512, 1,024, and 1,536 options. OCI documents 1,536 as the API default. The option is hidden for other on-demand embedding models, and execution rejects dimensions supplied for unsupported on-demand models. This prevents Embed 4-only values from being sent to Embed 3 models.
+- Embedding truncation defaults to `None`, matching the OCI Console. Oversized input returns an error unless the user explicitly selects `Start` or `End`; truncation is a safety net, not a substitute for upstream chunking.
 - Chat catalog pages are cached for 60 seconds. Cache entries are isolated by non-secret authentication identity, region, compartment, vendor, capability, and page token. The cache is bounded with insertion-order eviction, shares in-flight requests, and normalizes/sorts models once so typeahead only filters local search text.
 - Inference clients are cached for 60 seconds by non-secret authentication identity, region, and validated endpoint. This lets Agent tool-resume passes reuse the same OCI client even though n8n creates a fresh LangChain wrapper per pass. The 32-entry insertion-order cache shares in-flight creation and removes expired entries without closing clients that an in-flight workflow may still be using. A credential update with the same cache identity takes effect when the current entry expires.
 
@@ -38,7 +41,8 @@ Provide OCI Generative AI chat-model and embeddings integrations for n8n AI work
 - Socket observations from the local diagnostic showed one cached OCI client serving eleven chat wrappers. Sequential requests reused one OCI TCP connection. Ten concurrent requests opened ten TCP connections to the same OCI endpoint. This is expected connection-pool concurrency, not evidence that ten SDK clients were created.
 - Client lifetime and connection lifetime are separate. A single SDK client can own a transport pool with several simultaneous connections. Do not serialize OCI requests merely to reduce socket count, because that would reduce throughput and increase latency.
 - The local diagnostic observed ten connections after its first ten-request concurrent batch and zero after five seconds idle. A second batch then opened ten new connections because the pool was empty. An immediate third batch reused all ten of the second batch's local endpoints. This shows idle retirement and active-pool reuse for the tested OCI transport.
-- The diagnostic records socket observations instead of asserting a fixed connection count. Its default timings are five and 30 seconds; `OCI_SOCKET_IDLE_SECONDS` and `OCI_SOCKET_EXTENDED_IDLE_SECONDS` can shorten or extend those local observations.
+- The socket diagnostic records observations instead of asserting a fixed connection count. Its default timings are five and 30 seconds; `OCI_SOCKET_IDLE_SECONDS` and `OCI_SOCKET_EXTENDED_IDLE_SECONDS` can shorten or extend those local observations.
+- The standalone OCI integration scripts run only when `OCI_GENAI_MODEL` and `OCI_GENAI_COMPARTMENT_OCID` are set. Otherwise they print a skip message and exit successfully. OCI authentication and region remain sourced from the configured default OCI profile.
 
 ```mermaid
 flowchart LR
@@ -71,7 +75,7 @@ sequenceDiagram
 ## OCI Compatibility
 
 - Tool schemas remove `$schema`, which OCI function declarations do not accept.
-- Structured LangChain message content is converted to text before OCI request preparation.
+- OCI chat accepts plain strings and text-only LangChain content blocks. It rejects images, audio, documents, and mixed content until OCI multimodal conversion is explicitly implemented.
 - The chat node subclasses the OCI chat model instead of binding it, preserving chat-model capabilities such as tool binding for downstream n8n agents.
 
 ## Implementation TODO
@@ -81,6 +85,7 @@ sequenceDiagram
 - [x] Add OCI request compatibility handling for tools and structured messages.
 - [x] Add input-validation, endpoint-validation, catalog-cache, inference-client-cache, and node configuration unit coverage.
 - [x] Add a local OCI socket diagnostic that exercises repeated requests on one wrapper, new wrappers sharing the inference-client cache, and concurrent requests.
+- [x] Add a standalone OCI chat integration check separate from the socket diagnostic.
 - [x] Observe idle socket behavior and connection reuse across repeated concurrent batches with the local OCI diagnostic.
 - [ ] Replace the local `@oracle/langchain-oci` tarball with its published npm package.
 
@@ -91,9 +96,11 @@ sequenceDiagram
 Run from `packages/@n8n/nodes-langchain`:
 
 ```bash
-pnpm test credentials/test/OracleCloudGenAiApi.credentials.test.ts utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
+pnpm test credentials/test/OracleCloudGenAiApi.credentials.test.ts utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/llms/LmChatOciGenAi/test/OciMessageContent.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
 pnpm typecheck
 pnpm lint
+pnpm test:oci # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
+pnpm test:oci:sockets # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
 ```
 
 ### Manual
@@ -101,7 +108,8 @@ pnpm lint
 1. Create an **OCI Generative AI API** credential with a valid authentication method and Region ID. Leave **Inference Endpoint (Advanced)** empty for the standard region-derived endpoint.
 2. On the Chat node, enter a valid compartment OCID and open the model selector. Type several characters and confirm results filter without repeated loading delays. Select an on-demand chat model and connect it to an AI Agent.
 3. Invoke the agent with a plain prompt, a tool call, and structured message content. Confirm text responses, streaming, and tool calls complete successfully.
-4. On the Embeddings node, select an on-demand model available in the selected region. Connect it to a vector store or embedding consumer and confirm it creates vectors.
+4. On the Embeddings node, select **Cohere Embed 4** and confirm **Output Dimensions** offers 256, 512, 1,024, and 1,536, with 1,536 selected by default. Select a different on-demand embedding model and confirm the setting is hidden. Connect it to a vector store or embedding consumer and confirm it creates vectors with the dimension expected by the vector index.
 5. For dedicated serving, select **Dedicated** and enter an endpoint OCID. Confirm leaving the endpoint ID empty produces the expected validation error.
 6. Optionally set the advanced endpoint to the exact inference host for the selected region and realm. Confirm a mismatched realm, non-HTTPS URL, path, port, query, fragment, or credentials is rejected.
-7. To inspect OCI client and socket behavior locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm test:oci-sockets`. Review the sequential, same-wrapper, new-wrapper, idle, and three concurrent-batch socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. The output compares reused, new, and retired local endpoints. Set `OCI_SOCKET_IDLE_SECONDS` or `OCI_SOCKET_EXTENDED_IDLE_SECONDS` to adjust the observation intervals.
+7. To verify OCI chat integration locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm test:oci`.
+8. To inspect OCI client and socket behavior locally, run `pnpm test:oci:sockets`. Review the sequential, same-wrapper, new-wrapper, idle, and three concurrent-batch socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. The output compares reused, new, and retired local endpoints. Set `OCI_SOCKET_IDLE_SECONDS` or `OCI_SOCKET_EXTENDED_IDLE_SECONDS` to adjust the observation intervals.

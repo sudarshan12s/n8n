@@ -3,9 +3,10 @@ import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
 import type { ILoadOptionsFunctions, INode, ISupplyDataFunctions } from 'n8n-workflow';
 import type { Mocked } from 'vitest';
 
-const { createClient, getCachedCatalog } = vi.hoisted(() => ({
+const { createClient, getCachedCatalog, validateModelId } = vi.hoisted(() => ({
 	createClient: vi.fn(),
 	getCachedCatalog: vi.fn(),
+	validateModelId: vi.fn((value: string) => value),
 }));
 
 vi.mock('@oracle/langchain-oci', () => ({
@@ -20,7 +21,7 @@ vi.mock('../../../../utils/ociGenAi', () => ({
 		if (!value.startsWith('ocid1.compartment.')) throw new Error('Invalid OCI Compartment OCID');
 		return value;
 	},
-	validateOciModelId: (value: string) => value,
+	validateOciModelId: validateModelId,
 }));
 
 import { LmChatOciGenAi } from '../LmChatOciGenAi.node';
@@ -99,6 +100,33 @@ describe('LmChatOciGenAi', () => {
 			}),
 		);
 		expect(result.response).toBeInstanceOf(MockedOciGenAiGenericChat);
+	});
+
+	it('uses a dedicated endpoint without retrieving or validating an on-demand model', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') throw new Error('Model must not be read for dedicated serving');
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'dedicated';
+			if (name === 'dedicatedEndpointId') {
+				return 'ocid1.generativeaidededicatedaiendpoint.oc1..test';
+			}
+			if (name === 'options') return {};
+			return '';
+		});
+
+		await node.supplyData.call(context, 0);
+
+		expect(validateModelId).not.toHaveBeenCalled();
+		expect(MockedOciGenAiGenericChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dedicatedEndpointId: 'ocid1.generativeaidededicatedaiendpoint.oc1..test',
+			}),
+		);
+
+		const modelProperty = node.description.properties.find((property) => property.name === 'model');
+		expect(modelProperty?.displayOptions).toEqual({ show: { servingMode: ['onDemand'] } });
 	});
 
 	it('rejects an invalid compartment before creating an inference client', async () => {

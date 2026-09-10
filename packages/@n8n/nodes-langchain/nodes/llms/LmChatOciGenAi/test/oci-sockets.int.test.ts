@@ -9,6 +9,10 @@ import { ConfigFileReader } from 'oci-common';
 import { LmChatOciGenAi } from '../LmChatOciGenAi.node';
 import type { OciGenAiCredentials } from '../../../../utils/ociGenAi';
 
+function hasOciIntegrationConfig(): boolean {
+	return Boolean(process.env.OCI_GENAI_MODEL && process.env.OCI_GENAI_COMPARTMENT_OCID);
+}
+
 function requiredEnv(name: string): string {
 	const value = process.env[name];
 
@@ -250,6 +254,11 @@ async function runConcurrentBatch(
 }
 
 async function run(): Promise<void> {
+	if (!hasOciIntegrationConfig()) {
+		console.log('[OCI INT TEST] Skipped: OCI integration environment is not configured.');
+		return;
+	}
+
 	const credentials = getCredentials();
 	const model = getModel();
 	const compartmentId = getCompartmentId();

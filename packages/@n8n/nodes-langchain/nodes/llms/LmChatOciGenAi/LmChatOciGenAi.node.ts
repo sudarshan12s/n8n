@@ -1,5 +1,4 @@
 import { OciGenAiGenericChat } from '@oracle/langchain-oci';
-import type { BaseMessage } from '@langchain/core/messages';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
@@ -92,33 +91,6 @@ function sanitizeOciToolDefinitions(
 	}));
 }
 
-function stringifyMessageContent(value: unknown): string {
-	if (typeof value === 'string') {
-		return value;
-	}
-
-	if (Array.isArray(value)) {
-		return value.map(stringifyMessageContent).join('\n');
-	}
-
-	if (isRecord(value) && typeof value.text === 'string') {
-		return value.text;
-	}
-
-	return JSON.stringify(value) ?? '';
-}
-
-function normalizeMessageContent(message: BaseMessage): BaseMessage {
-	if (typeof message.content === 'string') {
-		return message;
-	}
-
-	return Object.assign(Object.create(Object.getPrototypeOf(message)), message, {
-		// The OCI SDK accepts text message content; preserve non-text content as readable JSON.
-		content: stringifyMessageContent(message.content),
-	});
-}
-
 /**
  * Keep this as a chat-model subclass rather than returning model.bind(...).
  *
@@ -141,14 +113,6 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 	) {
 		super(params);
 		this.defaultRequestParams = params.defaultRequestParams ?? {};
-	}
-
-	override _prepareRequest(
-		messages: Parameters<OciGenAiGenericChat['_prepareRequest']>[0],
-		options: Parameters<OciGenAiGenericChat['_prepareRequest']>[1],
-		stream?: boolean,
-	) {
-		return super._prepareRequest(messages.map(normalizeMessageContent), options, stream);
 	}
 
 	override _createRequest(
@@ -185,6 +149,11 @@ const modelProperty: INodeProperties = {
 		value: DEFAULT_MODEL,
 	},
 	required: true,
+	displayOptions: {
+		show: {
+			servingMode: ['onDemand'],
+		},
+	},
 	modes: [
 		{
 			displayName: 'From List',
@@ -427,14 +396,6 @@ export class LmChatOciGenAi implements INodeType {
 			});
 		}
 
-		let model: string;
-		try {
-			const modelParameter = this.getNodeParameter('model', itemIndex);
-			model = getModelId(modelParameter);
-		} catch (error) {
-			throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
-		}
-
 		let compartmentId: string;
 		try {
 			compartmentId = validateOciCompartmentId(
@@ -458,6 +419,15 @@ export class LmChatOciGenAi implements INodeType {
 				'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
 				{ itemIndex },
 			);
+		}
+
+		let model: string | undefined;
+		if (servingMode === 'onDemand') {
+			try {
+				model = getModelId(this.getNodeParameter('model', itemIndex));
+			} catch (error) {
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+			}
 		}
 
 		const options = this.getNodeParameter('options', itemIndex, {});

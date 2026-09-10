@@ -140,30 +140,36 @@ export type OciGenAiOnDemandEmbeddingModel = {
 	regions: string[];
 };
 
-const ON_DEMAND_EMBEDDING_MODELS: OciGenAiOnDemandEmbeddingModel[] = [
-	// OCI does not expose a reliable embedding catalog in every region, so keep this explicit.
+/**
+ * Verified on-demand embedding models for the n8n selector.
+ *
+ * This is intentionally curated rather than derived from listModels(), because the OCI management
+ * catalog does not provide enough information to reliably distinguish on-demand availability by region.
+ * Keep this list aligned with OCI Models by Region. Manual model ID entry remains available for new models.
+ */
+const OCI_VERIFIED_ON_DEMAND_EMBEDDING_MODELS: OciGenAiOnDemandEmbeddingModel[] = [
 	{
 		displayName: 'Cohere Embed 4',
 		modelId: 'cohere.embed-v4.0',
 		regions: ['us-ashburn-1', 'us-chicago-1', 'me-abudhabi-1', 'me-riyadh-1', 'ap-osaka-1'],
 	},
 	{
-		displayName: 'Cohere Embed English 3',
+		displayName: 'Cohere Embed English 3 (Deprecated)',
 		modelId: 'cohere.embed-english-v3.0',
 		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
 	},
 	{
-		displayName: 'Cohere Embed English Light 3',
+		displayName: 'Cohere Embed English Light 3 (Deprecated)',
 		modelId: 'cohere.embed-english-light-v3.0',
 		regions: ['us-chicago-1'],
 	},
 	{
-		displayName: 'Cohere Embed Multilingual 3',
+		displayName: 'Cohere Embed Multilingual 3 (Deprecated)',
 		modelId: 'cohere.embed-multilingual-v3.0',
 		regions: ['us-chicago-1', 'sa-saopaulo-1', 'eu-frankfurt-1', 'uk-london-1', 'ap-osaka-1'],
 	},
 	{
-		displayName: 'Cohere Embed Multilingual Light 3',
+		displayName: 'Cohere Embed Multilingual Light 3 (Deprecated)',
 		modelId: 'cohere.embed-multilingual-light-v3.0',
 		regions: ['us-chicago-1'],
 	},
@@ -230,7 +236,7 @@ export function getOnDemandEmbeddingModels(
 	const normalizedRegionId = regionId.trim().toLowerCase();
 	const normalizedFilter = filter?.trim().toLowerCase() ?? '';
 
-	return ON_DEMAND_EMBEDDING_MODELS.filter(
+	return OCI_VERIFIED_ON_DEMAND_EMBEDDING_MODELS.filter(
 		(model) =>
 			model.regions.includes(normalizedRegionId) &&
 			(!normalizedFilter ||

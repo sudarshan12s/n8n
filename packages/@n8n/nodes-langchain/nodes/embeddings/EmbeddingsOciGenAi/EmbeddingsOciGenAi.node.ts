@@ -25,6 +25,8 @@ import {
 
 const DEFAULT_BATCH_SIZE = 96;
 const DEFAULT_MAX_CONCURRENCY = 2;
+const COHERE_EMBED_V4_MODEL_ID = 'cohere.embed-v4.0';
+const COHERE_EMBED_V4_OUTPUT_DIMENSIONS = [256, 512, 1024, 1536] as const;
 
 type ResourceLocatorValue = {
 	mode: string;
@@ -72,6 +74,11 @@ function getTruncate(value: unknown): ociModels.EmbedTextDetails.Truncate | unde
 			return undefined;
 	}
 }
+
+function isCohereEmbedV4OutputDimension(value: number): boolean {
+	return COHERE_EMBED_V4_OUTPUT_DIMENSIONS.some((dimension) => dimension === value);
+}
+
 const modelProperty: INodeProperties = {
 	displayName: 'Model',
 	name: 'model',
@@ -182,13 +189,19 @@ const optionsProperty: INodeProperties = {
 		{
 			displayName: 'Output Dimensions',
 			name: 'outputDimensions',
-			type: 'number',
-			default: 1024,
-			typeOptions: {
-				minValue: 1,
+			type: 'options',
+			options: COHERE_EMBED_V4_OUTPUT_DIMENSIONS.map((value) => ({
+				name: String(value),
+				value,
+			})),
+			default: 1536,
+			displayOptions: {
+				show: {
+					'/model.value': [COHERE_EMBED_V4_MODEL_ID],
+				},
 			},
 			description:
-				'Number of dimensions in the returned embedding vector. The selected embedding model must support this value. Changing it can require a vector store with matching dimensions.',
+				'Number of dimensions in the returned embedding vector. Cohere Embed 4 supports 256, 512, 1024, and 1536. Changing this value can require a vector store with matching dimensions.',
 		},
 		{
 			displayName: 'Truncate',
@@ -208,9 +221,9 @@ const optionsProperty: INodeProperties = {
 					value: 'END',
 				},
 			],
-			default: 'START',
+			default: 'NONE',
 			description:
-				'Controls whether OCI truncates input that exceeds the model token limit. Start removes tokens from the beginning. End removes tokens from the end. None returns an error for oversized input.',
+				'Controls how OCI handles input that exceeds the model token limit. None returns an error. Start removes tokens from the beginning. End removes tokens from the end.',
 		},
 	],
 };
@@ -355,6 +368,30 @@ export class EmbeddingsOciGenAi implements INodeType {
 			typeof options.outputDimensions === 'number' && options.outputDimensions > 0
 				? options.outputDimensions
 				: undefined;
+
+		if (
+			servingMode === 'onDemand' &&
+			outputDimensions !== undefined &&
+			model !== COHERE_EMBED_V4_MODEL_ID
+		) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Output Dimensions is supported only by Cohere Embed 4 for on-demand OCI embedding models.',
+				{ itemIndex },
+			);
+		}
+
+		if (
+			model === COHERE_EMBED_V4_MODEL_ID &&
+			outputDimensions !== undefined &&
+			!isCohereEmbedV4OutputDimension(outputDimensions)
+		) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Output Dimensions for Cohere Embed 4 must be 256, 512, 1024, or 1536.',
+				{ itemIndex },
+			);
+		}
 
 		const truncate = getTruncate(options.truncate);
 
