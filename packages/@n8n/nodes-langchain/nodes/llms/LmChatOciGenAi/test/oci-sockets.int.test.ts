@@ -1,13 +1,17 @@
+import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import { HumanMessage } from '@langchain/core/messages';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import process from 'node:process';
-import type { INode, ISupplyDataFunctions } from 'n8n-workflow';
 import { ConfigFileReader } from 'oci-common';
 
-import { LmChatOciGenAi } from '../LmChatOciGenAi.node';
-import type { OciGenAiCredentials } from '../../../../utils/ociGenAi';
+import {
+	createOciGenAiClient,
+	validateOciCompartmentId,
+	validateOciModelId,
+	type OciGenAiCredentials,
+} from '../../../../utils/ociGenAi';
 
 function hasOciIntegrationConfig(): boolean {
 	return Boolean(process.env.OCI_GENAI_MODEL && process.env.OCI_GENAI_COMPARTMENT_OCID);
@@ -143,44 +147,18 @@ async function getOciEndpointIp(credentials: OciGenAiCredentials): Promise<strin
 	return result.address;
 }
 
-function createChatNodeContext(
+async function createChatModel(
 	credentials: OciGenAiCredentials,
-	model: string,
+	modelId: string,
 	compartmentId: string,
-): ISupplyDataFunctions {
-	const workflowNode: INode = {
-		id: 'oci-socket-check',
-		name: 'OCI Generative AI Chat Model socket check',
-		type: '@n8n/n8n-nodes-langchain.lmChatOciGenAi',
-		typeVersion: 1,
-		position: [0, 0],
-		parameters: {},
-	};
-
-	return {
-		getCredentials: async () => credentials,
-		getNode: () => workflowNode,
-		getNodeParameter: (name: string) => {
-			if (name === 'model') return model;
-			if (name === 'compartmentId') return compartmentId;
-			if (name === 'servingMode') return 'onDemand';
-			if (name === 'options') return {};
-			return '';
-		},
-	} as unknown as ISupplyDataFunctions;
-}
-
-type InvokableChatModel = {
-	invoke(messages: HumanMessage[]): Promise<{ content: unknown }>;
-};
-
-function isInvokableChatModel(value: unknown): value is InvokableChatModel {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'invoke' in value &&
-		typeof value.invoke === 'function'
-	);
+): Promise<OciGenAiGenericChat> {
+	// Keep this standalone script independent of the node's workspace-only runtime imports.
+	// supplyData() behavior is covered by the chat node's Vitest unit tests.
+	return new OciGenAiGenericChat({
+		client: await createOciGenAiClient(credentials),
+		compartmentId: validateOciCompartmentId(compartmentId),
+		onDemandModelId: validateOciModelId(modelId),
+	});
 }
 
 function printOciConnections(ociIp: string, label: string): string[] {
@@ -241,7 +219,7 @@ async function waitForIdleObservation(durationMs: number): Promise<void> {
 }
 
 async function runConcurrentBatch(
-	models: InvokableChatModel[],
+	models: OciGenAiGenericChat[],
 	batchNumber: number,
 ): Promise<Array<{ content: unknown }>> {
 	return await Promise.all(
@@ -268,27 +246,21 @@ async function run(): Promise<void> {
 		25,
 	);
 	const ociIp = await getOciEndpointIp(credentials);
-	const chatNode = new LmChatOciGenAi();
 
 	console.log(`\n[OCI INT TEST] Current PID: ${process.pid}`);
-	printSocketSnapshot('before OCI chat-node creation');
+	printSocketSnapshot('before OCI chat-model creation');
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'before OCI chat-node creation');
+		printOciConnections(ociIp, 'before OCI chat-model creation');
 	}
 
-	const firstResult = await chatNode.supplyData.call(
-		createChatNodeContext(credentials, model, compartmentId),
-		0,
-	);
-	const firstModel = firstResult.response;
-	assert.ok(isInvokableChatModel(firstModel), 'The chat node did not return an invokable model');
+	const firstModel = await createChatModel(credentials, model, compartmentId);
 
-	console.log('[OCI INT TEST] Created chat model through LmChatOciGenAi.supplyData()');
-	printSocketSnapshot('after OCI chat-node creation');
+	console.log('[OCI INT TEST] Created OCI chat model');
+	printSocketSnapshot('after OCI chat-model creation');
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'after OCI chat-node creation');
+		printOciConnections(ociIp, 'after OCI chat-model creation');
 	}
 
 	const firstResponse = await firstModel.invoke([
@@ -296,10 +268,10 @@ async function run(): Promise<void> {
 	]);
 
 	console.log('[OCI INT TEST] First response:', firstResponse.content);
-	printSocketSnapshot('after first chat-node request');
+	printSocketSnapshot('after first OCI chat-model request');
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'after first chat-node request');
+		printOciConnections(ociIp, 'after first OCI chat-model request');
 	}
 
 	// Reuse the same wrapper after its OCI SDK client has been initialized.
@@ -317,27 +289,19 @@ async function run(): Promise<void> {
 		printOciConnections(ociIp, 'after second request using same chat wrapper');
 	}
 
-	// New wrappers begin uninitialized but receive the n8n-cached OCI inference client.
+	// New wrappers begin uninitialized but receive the cached OCI inference client.
 	const wrapperCount = 10;
 	const models = [] as Array<typeof firstModel>;
 
 	for (let i = 0; i < wrapperCount; i++) {
-		const result = await chatNode.supplyData.call(
-			createChatNodeContext(credentials, model, compartmentId),
-			0,
-		);
-		assert.ok(
-			isInvokableChatModel(result.response),
-			'The chat node did not return an invokable model',
-		);
-		models.push(result.response);
-		console.log(`[OCI INT TEST] Created chat model through node #${i + 2}`);
+		models.push(await createChatModel(credentials, model, compartmentId));
+		console.log(`[OCI INT TEST] Created OCI chat model #${i + 2}`);
 	}
 
-	printSocketSnapshot('after creating additional chat-node models');
+	printSocketSnapshot('after creating additional OCI chat models');
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'after creating additional chat-node models');
+		printOciConnections(ociIp, 'after creating additional OCI chat models');
 	}
 
 	for (let i = 0; i < models.length; i++) {
@@ -347,17 +311,17 @@ async function run(): Promise<void> {
 		console.log(`[OCI INT TEST] wrapper #${i + 2} response:`, response.content);
 	}
 
-	printSocketSnapshot('after all chat-node requests');
+	printSocketSnapshot('after all OCI chat-model requests');
 
 	if (ociIp) {
-		printOciConnections(ociIp, 'after all chat-node requests');
+		printOciConnections(ociIp, 'after all OCI chat-model requests');
 	}
 
 	// Observe connection-pool behavior across repeated concurrent batches.
 	const concurrentResponses = await runConcurrentBatch(models, 1);
 
 	console.log(`[OCI INT TEST] Completed ${concurrentResponses.length} concurrent batch 1 requests`);
-	printSocketSnapshot('after concurrent chat-node requests');
+	printSocketSnapshot('after concurrent OCI chat-model requests');
 	let firstBatchConnections: string[] = [];
 
 	if (ociIp) {

@@ -161,7 +161,8 @@ const modelProperty: INodeProperties = {
 			placeholder: 'cohere.embed-v4.0',
 		},
 	],
-	description: 'The on-demand OCI Generative AI embedding model',
+	description:
+		'From List shows known on-demand embedding models for the selected region. Use ID to specify another supported OCI embedding model.',
 };
 
 const compartmentProperty: INodeProperties = {

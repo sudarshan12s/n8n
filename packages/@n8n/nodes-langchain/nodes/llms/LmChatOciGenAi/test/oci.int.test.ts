@@ -1,11 +1,15 @@
+import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import { HumanMessage } from '@langchain/core/messages';
 import assert from 'node:assert/strict';
 import process from 'node:process';
-import type { INode, ISupplyDataFunctions } from 'n8n-workflow';
 import { ConfigFileReader } from 'oci-common';
 
-import { LmChatOciGenAi } from '../LmChatOciGenAi.node';
-import type { OciGenAiCredentials } from '../../../../utils/ociGenAi';
+import {
+	createOciGenAiClient,
+	validateOciCompartmentId,
+	validateOciModelId,
+	type OciGenAiCredentials,
+} from '../../../../utils/ociGenAi';
 
 function hasOciIntegrationConfig(): boolean {
 	return Boolean(process.env.OCI_GENAI_MODEL && process.env.OCI_GENAI_COMPARTMENT_OCID);
@@ -40,44 +44,18 @@ function getCredentials(): OciGenAiCredentials {
 	};
 }
 
-function createChatNodeContext(
+async function createChatModel(
 	credentials: OciGenAiCredentials,
-	model: string,
+	modelId: string,
 	compartmentId: string,
-): ISupplyDataFunctions {
-	const workflowNode: INode = {
-		id: 'oci-integration-check',
-		name: 'OCI Generative AI Chat Model integration check',
-		type: '@n8n/n8n-nodes-langchain.lmChatOciGenAi',
-		typeVersion: 1,
-		position: [0, 0],
-		parameters: {},
-	};
-
-	return {
-		getCredentials: async () => credentials,
-		getNode: () => workflowNode,
-		getNodeParameter: (name: string) => {
-			if (name === 'model') return model;
-			if (name === 'compartmentId') return compartmentId;
-			if (name === 'servingMode') return 'onDemand';
-			if (name === 'options') return {};
-			return '';
-		},
-	} as unknown as ISupplyDataFunctions;
-}
-
-type InvokableChatModel = {
-	invoke(messages: HumanMessage[]): Promise<{ content: unknown }>;
-};
-
-function isInvokableChatModel(value: unknown): value is InvokableChatModel {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'invoke' in value &&
-		typeof value.invoke === 'function'
-	);
+): Promise<OciGenAiGenericChat> {
+	// Keep this standalone script independent of the node's workspace-only runtime imports.
+	// supplyData() behavior is covered by the chat node's Vitest unit tests.
+	return new OciGenAiGenericChat({
+		client: await createOciGenAiClient(credentials),
+		compartmentId: validateOciCompartmentId(compartmentId),
+		onDemandModelId: validateOciModelId(modelId),
+	});
 }
 
 async function run(): Promise<void> {
@@ -89,18 +67,8 @@ async function run(): Promise<void> {
 	const credentials = getCredentials();
 	const model = requiredEnv('OCI_GENAI_MODEL');
 	const compartmentId = requiredEnv('OCI_GENAI_COMPARTMENT_OCID');
-	const chatNode = new LmChatOciGenAi();
-	const result = await chatNode.supplyData.call(
-		createChatNodeContext(credentials, model, compartmentId),
-		0,
-	);
-
-	assert.ok(
-		isInvokableChatModel(result.response),
-		'The chat node did not return an invokable model',
-	);
-
-	const response = await result.response.invoke([
+	const chatModel = await createChatModel(credentials, model, compartmentId);
+	const response = await chatModel.invoke([
 		new HumanMessage('Reply with exactly: OCI integration test passed'),
 	]);
 
