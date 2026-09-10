@@ -44,7 +44,9 @@ import {
 	getCachedOciGenAiModelCatalogPage,
 	getOciEmbeddingModelCapabilities,
 	getOciEmbeddingModelIdsWithOutputDimensions,
+	getOnDemandModelId,
 	getOnDemandEmbeddingModels,
+	isOnDemandModelAvailable,
 	OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
 	type OciGenAiCredentials,
 	validateOciCompartmentId,
@@ -97,6 +99,40 @@ describe('OCI input validation', () => {
 			expect(getOnDemandEmbeddingModels('ap-hyderabad-1')).not.toEqual(
 				expect.arrayContaining([expect.objectContaining({ modelId: 'cohere.embed-v4.0' })]),
 			);
+		});
+	});
+
+	describe('model catalog normalization', () => {
+		it('keeps active models and excludes retired models', () => {
+			expect(
+				isOnDemandModelAvailable({
+					id: 'meta.llama-3.3-70b-instruct',
+					timeOnDemandRetired: null,
+				}),
+			).toBe(true);
+			expect(
+				isOnDemandModelAvailable({
+					id: 'meta.llama-3.3-70b-instruct',
+					timeOnDemandRetired: new Date(0),
+				}),
+			).toBe(false);
+			expect(
+				isOnDemandModelAvailable({
+					id: 'meta.llama-3.3-70b-instruct',
+					timeOnDemandRetired: 'not-a-date',
+				}),
+			).toBe(true);
+		});
+
+		it('derives a provider model ID from a management model OCID', () => {
+			expect(
+				getOnDemandModelId({
+					id: 'ocid1.generativeaimodel.oc1.phx.example',
+					vendor: 'Meta',
+					displayName: 'Meta Llama 3.3 70B Instruct',
+				}),
+			).toBe('meta.llama-3.3-70b-instruct');
+			expect(getOnDemandModelId({ id: 'ocid1.generativeaimodel.oc1.phx.example' })).toBe('');
 		});
 	});
 
@@ -401,6 +437,29 @@ describe('OCI input validation', () => {
 			).rejects.toThrow('OCI vendor must contain only letters');
 
 			expect(listModels).not.toHaveBeenCalled();
+		});
+
+		it('removes a failed page from the cache so a later search can retry it', async () => {
+			const request = {
+				compartmentId: 'ocid1.compartment.oc1..test',
+				capability: ociModels.ModelCapability.Chat,
+			};
+			listModels.mockRejectedValueOnce(new Error('OCI unavailable'));
+
+			await expect(getCachedOciGenAiModelCatalogPage(ociCredentials, request)).rejects.toThrow(
+				'OCI unavailable',
+			);
+
+			listModels.mockResolvedValueOnce({
+				modelCollection: { items: [] },
+				opcNextPage: undefined,
+			});
+			await expect(getCachedOciGenAiModelCatalogPage(ociCredentials, request)).resolves.toEqual({
+				models: [],
+				searchModels: [],
+				nextPage: undefined,
+			});
+			expect(listModels).toHaveBeenCalledTimes(2);
 		});
 	});
 });

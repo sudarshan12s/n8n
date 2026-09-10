@@ -13,7 +13,10 @@ const { createClient, getCachedCatalog, getConnectionHint, validateModelId, vali
 			type: 'notice',
 			default: '',
 		})),
-		validateModelId: vi.fn((value: string) => value),
+		validateModelId: vi.fn((value: string) => {
+			if (value === 'invalid-model') throw new Error('Invalid OCI Generative AI model ID');
+			return value;
+		}),
 		validateVendor: vi.fn((value: string) => {
 			const normalized = value.trim().toLowerCase();
 			if (normalized.includes('/') || normalized.includes(' '))
@@ -152,6 +155,39 @@ describe('LmChatOciGenAi', () => {
 		expect(vendorProperty?.displayOptions).toEqual({ show: { servingMode: ['onDemand'] } });
 	});
 
+	it('requires a dedicated endpoint before creating an inference client', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'dedicated';
+			if (name === 'options') return {};
+			return '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
+			'Dedicated Endpoint ID is required',
+		);
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
+	it('rejects an invalid on-demand model before creating an inference client', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') return 'invalid-model';
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'onDemand';
+			if (name === 'options') return {};
+			return '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
+			'Invalid OCI Generative AI model ID',
+		);
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
 	it('rejects an invalid compartment before creating an inference client', async () => {
 		const node = new LmChatOciGenAi();
 		const context = createContext();
@@ -179,6 +215,45 @@ describe('LmChatOciGenAi', () => {
 		const result = await search.call(context as unknown as ILoadOptionsFunctions, 'llama');
 
 		expect(result.results).toEqual([{ name: 'Meta Llama', value: 'meta.llama-3.3-70b-instruct' }]);
+	});
+
+	it('returns the OCI pagination token from model search', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		getCachedCatalog.mockResolvedValue({ searchModels: [], nextPage: 'next-page' });
+
+		const search = node.methods.listSearch?.searchChatModels;
+		if (!search) throw new Error('Chat model search is not configured');
+		const result = await search.call(
+			context as unknown as ILoadOptionsFunctions,
+			undefined,
+			'current-page',
+		);
+
+		expect(getCachedCatalog).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ paginationToken: 'current-page' }),
+		);
+		expect(result).toEqual({ results: [], paginationToken: 'next-page' });
+	});
+
+	it('returns guidance instead of loading models for an invalid compartment', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi
+			.fn()
+			.mockImplementation((name: string) =>
+				name === 'compartmentId' ? 'invalid-compartment' : '',
+			);
+
+		const search = node.methods.listSearch?.searchChatModels;
+		if (!search) throw new Error('Chat model search is not configured');
+		const result = await search.call(context as unknown as ILoadOptionsFunctions);
+
+		expect(result.results).toEqual([
+			{ name: 'Enter a Valid Compartment OCID to Load Models', value: '' },
+		]);
+		expect(getCachedCatalog).not.toHaveBeenCalled();
 	});
 
 	it('normalizes the vendor filter before searching chat models', async () => {

@@ -178,6 +178,59 @@ describe('EmbeddingsOciGenAi', () => {
 		expect(createClient).not.toHaveBeenCalled();
 	});
 
+	it('creates embeddings for a dedicated endpoint without reading an on-demand model', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') throw new Error('Model must not be read for dedicated serving');
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'dedicated';
+			if (name === 'dedicatedEndpointId') {
+				return 'ocid1.generativeaidededicatedaiendpoint.oc1..test';
+			}
+			if (name === 'options') return {};
+			return '';
+		});
+
+		await node.supplyData.call(context, 0);
+
+		expect(MockedOciGenAiEmbeddings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dedicatedEndpointId: 'ocid1.generativeaidededicatedaiendpoint.oc1..test',
+			}),
+		);
+	});
+
+	it('rejects an invalid compartment before creating an inference client', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'compartmentId') return 'invalid-compartment';
+			return name === 'options' ? {} : '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow('Invalid OCI Compartment OCID');
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[{ batchSize: 97 }, 'Batch Size must be an integer between 1 and 96.'],
+		[{ maxConcurrency: 0 }, 'Maximum Concurrency must be a positive integer.'],
+	])('rejects invalid embedding request option %o', async (options, errorMessage) => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') return 'cohere.embed-v4.0';
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'onDemand';
+			if (name === 'options') return options;
+			return '';
+		});
+
+		await expect(node.supplyData.call(context, 0)).rejects.toThrow(errorMessage);
+		expect(createClient).not.toHaveBeenCalled();
+	});
+
 	it('passes output dimensions for a model without verified capability metadata to OCI', async () => {
 		const node = new EmbeddingsOciGenAi();
 		const context = createContext();

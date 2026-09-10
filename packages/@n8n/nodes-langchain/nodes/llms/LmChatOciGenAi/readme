@@ -1,0 +1,18 @@
+lsof -nP -a -p 46417   -iTCP:443 -sTCP:ESTABLISHED
+COMMAND   PID          USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+node    46417 sudarshansoma   39u  IPv4 0xa051a760296b1c34      0t0  TCP 192.168.1.2:62354->146.235.10.153:443 (ESTABLISHED)
+
+
+
+
+export OCI_TENANCY_OCID="ocid1.tenancy.oc1..aaaaaaaanpqpnsgeeyd2vfoiqzpwgyl72xldzuitqx2fak4wzwhidlhzavmq"
+export OCI_USER_OCID="ocid1.user.oc1..aaaaaaaaut5zaxrn5rf26jqtc3rd6hcxtlyi3butd7f2kcohgoljh7r3dkka"
+export OCI_FINGERPRINT="3e:48:c0:b9:5b:17:38:77:36:91:9d:1b:0c:31:2f:bb"
+export OCI_PRIVATE_KEY="$(cat ~/.oci/oci_api_key.pem)"
+export OCI_REGION="us-phoenix-1"
+export OCI_GENAI_COMPARTMENT_OCID="ocid1.compartment.oc1..aaaaaaaalxzkqtmc3wqwloyhtdcli2nbfvmn5af3nmm3ek7xizeiqlnhjlsa"
+export OCI_GENAI_MODEL="xai.grok-4.3"
+
+pnpm test:oci-sockets
+
+
