@@ -1,6 +1,6 @@
-import { logWrapper } from '@n8n/ai-utilities';
 import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import { models as ociModels } from 'oci-generativeaiinference';
+import { logWrapper, getConnectionHintNoticeField } from '@n8n/ai-utilities';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
@@ -249,6 +249,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 		outputs: [NodeConnectionTypes.AiEmbedding],
 		outputNames: ['Embeddings'],
 		properties: [
+			getConnectionHintNoticeField([NodeConnectionTypes.AiVectorStore]),
 			modelProperty,
 			compartmentProperty,
 			servingModeProperty,
