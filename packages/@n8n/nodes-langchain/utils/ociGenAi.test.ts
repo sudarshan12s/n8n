@@ -42,12 +42,15 @@ import {
 	clearOciGenAiCachesForTesting,
 	createOciGenAiClient,
 	getCachedOciGenAiModelCatalogPage,
+	getOciEmbeddingModelCapabilities,
+	getOciEmbeddingModelIdsWithOutputDimensions,
 	getOnDemandEmbeddingModels,
 	OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
 	type OciGenAiCredentials,
 	validateOciCompartmentId,
 	validateOciEndpoint,
 	validateOciModelId,
+	validateOciVendor,
 } from './ociGenAi';
 
 const ociCredentials: OciGenAiCredentials = {
@@ -277,6 +280,30 @@ describe('OCI input validation', () => {
 		});
 	});
 
+	describe('validateOciVendor', () => {
+		it('normalizes supported provider names', () => {
+			expect(validateOciVendor(' Meta ')).toBe('meta');
+			expect(validateOciVendor('OpenAI')).toBe('openai');
+			expect(validateOciVendor(undefined)).toBeUndefined();
+		});
+
+		it('rejects invalid vendor filters', () => {
+			expect(() => validateOciVendor('open ai')).toThrow();
+			expect(() => validateOciVendor('vendor/name')).toThrow();
+			expect(() => validateOciVendor('a'.repeat(65))).toThrow();
+		});
+	});
+
+	describe('embedding model capabilities', () => {
+		it('returns output dimensions only for models with verified capability metadata', () => {
+			expect(getOciEmbeddingModelCapabilities('COHERE.EMBED-V4.0')).toEqual({
+				outputDimensions: [256, 512, 1024, 1536],
+			});
+			expect(getOciEmbeddingModelCapabilities('cohere.embed-english-v3.0')).toBeUndefined();
+			expect(getOciEmbeddingModelIdsWithOutputDimensions()).toEqual(['cohere.embed-v4.0']);
+		});
+	});
+
 	describe('validateOciEndpoint', () => {
 		it('accepts supported OCI inference endpoints', () => {
 			expect(
@@ -362,6 +389,18 @@ describe('OCI input validation', () => {
 				},
 			]);
 			expect(listModels).toHaveBeenCalledTimes(1);
+		});
+
+		it('validates vendor filters before calling OCI', async () => {
+			await expect(
+				getCachedOciGenAiModelCatalogPage(ociCredentials, {
+					compartmentId: 'ocid1.compartment.oc1..test',
+					capability: ociModels.ModelCapability.Chat,
+					vendor: 'vendor/name',
+				}),
+			).rejects.toThrow('OCI vendor must contain only letters');
+
+			expect(listModels).not.toHaveBeenCalled();
 		});
 	});
 });

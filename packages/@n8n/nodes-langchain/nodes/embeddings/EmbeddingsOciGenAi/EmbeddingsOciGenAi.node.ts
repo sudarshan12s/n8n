@@ -1,6 +1,5 @@
-import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
-import { models as ociModels } from 'oci-generativeaiinference';
 import { logWrapper, getConnectionHintNoticeField } from '@n8n/ai-utilities';
+import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
@@ -14,9 +13,12 @@ import {
 	type ISupplyDataFunctions,
 	type SupplyData,
 } from 'n8n-workflow';
+import { models as ociModels } from 'oci-generativeaiinference';
 
 import {
 	createOciGenAiClient,
+	getOciEmbeddingModelCapabilities,
+	getOciEmbeddingModelIdsWithOutputDimensions,
 	getOnDemandEmbeddingModels,
 	isOciGenAiCredentials,
 	validateOciCompartmentId,
@@ -25,8 +27,7 @@ import {
 
 const DEFAULT_BATCH_SIZE = 96;
 const DEFAULT_MAX_CONCURRENCY = 2;
-const COHERE_EMBED_V4_MODEL_ID = 'cohere.embed-v4.0';
-const COHERE_EMBED_V4_OUTPUT_DIMENSIONS = [256, 512, 1024, 1536] as const;
+const DEFAULT_OUTPUT_DIMENSIONS = '';
 
 type ResourceLocatorValue = {
 	mode: string;
@@ -75,9 +76,43 @@ function getTruncate(value: unknown): ociModels.EmbedTextDetails.Truncate | unde
 	}
 }
 
-function isCohereEmbedV4OutputDimension(value: number): boolean {
-	return COHERE_EMBED_V4_OUTPUT_DIMENSIONS.some((dimension) => dimension === value);
+function supportsOutputDimensions(modelId: string | undefined, value: number): boolean {
+	return (
+		getOciEmbeddingModelCapabilities(modelId ?? '')?.outputDimensions?.includes(value) ?? false
+	);
 }
+
+const outputDimensionsProperties: INodeProperties[] =
+	getOciEmbeddingModelIdsWithOutputDimensions().flatMap((modelId) => {
+		const outputDimensions = getOciEmbeddingModelCapabilities(modelId)?.outputDimensions;
+		if (!outputDimensions) return [];
+
+		return [
+			{
+				displayName: 'Output Dimensions',
+				name: 'outputDimensions',
+				type: 'options',
+				options: [
+					{
+						name: 'Default',
+						value: DEFAULT_OUTPUT_DIMENSIONS,
+					},
+					...outputDimensions.map((value) => ({
+						name: String(value),
+						value,
+					})),
+				],
+				default: DEFAULT_OUTPUT_DIMENSIONS,
+				displayOptions: {
+					show: {
+						'/model.value': [modelId],
+					},
+				},
+				description:
+					'Number of dimensions in the returned embedding vector. Default uses the model setting. Changing this value can require a vector store with matching dimensions.',
+			},
+		];
+	});
 
 const modelProperty: INodeProperties = {
 	displayName: 'Model',
@@ -186,23 +221,7 @@ const optionsProperty: INodeProperties = {
 			description:
 				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
 		},
-		{
-			displayName: 'Output Dimensions',
-			name: 'outputDimensions',
-			type: 'options',
-			options: COHERE_EMBED_V4_OUTPUT_DIMENSIONS.map((value) => ({
-				name: String(value),
-				value,
-			})),
-			default: 1536,
-			displayOptions: {
-				show: {
-					'/model.value': [COHERE_EMBED_V4_MODEL_ID],
-				},
-			},
-			description:
-				'Number of dimensions in the returned embedding vector. Cohere Embed 4 supports 256, 512, 1024, and 1536. Changing this value can require a vector store with matching dimensions.',
-		},
+		...outputDimensionsProperties,
 		{
 			displayName: 'Truncate',
 			name: 'truncate',
@@ -369,26 +388,10 @@ export class EmbeddingsOciGenAi implements INodeType {
 				? options.outputDimensions
 				: undefined;
 
-		if (
-			servingMode === 'onDemand' &&
-			outputDimensions !== undefined &&
-			model !== COHERE_EMBED_V4_MODEL_ID
-		) {
+		if (outputDimensions !== undefined && !supportsOutputDimensions(model, outputDimensions)) {
 			throw new NodeOperationError(
 				this.getNode(),
-				'Output Dimensions is supported only by Cohere Embed 4 for on-demand OCI embedding models.',
-				{ itemIndex },
-			);
-		}
-
-		if (
-			model === COHERE_EMBED_V4_MODEL_ID &&
-			outputDimensions !== undefined &&
-			!isCohereEmbedV4OutputDimension(outputDimensions)
-		) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Output Dimensions for Cohere Embed 4 must be 256, 512, 1024, or 1536.',
+				'Output Dimensions is not supported by the selected OCI embedding model.',
 				{ itemIndex },
 			);
 		}

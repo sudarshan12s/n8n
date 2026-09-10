@@ -22,6 +22,7 @@ import {
 	isOciGenAiCredentials,
 	validateOciCompartmentId,
 	validateOciModelId,
+	validateOciVendor,
 } from '../../../utils/ociGenAi';
 
 const DEFAULT_MODEL = 'meta.llama-3.3-70b-instruct';
@@ -371,7 +372,12 @@ export class LmChatOciGenAi implements INodeType {
 				if (!isOciGenAiCredentials(credentials)) {
 					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
 				}
-				const vendor = (this.getNodeParameter('vendor', '') as string).trim();
+				let vendor: string | undefined;
+				try {
+					vendor = validateOciVendor(this.getNodeParameter('vendor', '') as string);
+				} catch (error) {
+					throw new NodeOperationError(this.getNode(), error as Error);
+				}
 
 				const response = await getCachedOciGenAiModelCatalogPage(credentials, {
 					compartmentId,

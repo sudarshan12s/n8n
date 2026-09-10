@@ -3,17 +3,24 @@ import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
 import type { ILoadOptionsFunctions, INode, ISupplyDataFunctions } from 'n8n-workflow';
 import type { Mocked } from 'vitest';
 
-const { createClient, getCachedCatalog, getConnectionHint, validateModelId } = vi.hoisted(() => ({
-	createClient: vi.fn(),
-	getCachedCatalog: vi.fn(),
-	getConnectionHint: vi.fn(() => ({
-		displayName: 'Connection hint',
-		name: 'connectionHint',
-		type: 'notice',
-		default: '',
-	})),
-	validateModelId: vi.fn((value: string) => value),
-}));
+const { createClient, getCachedCatalog, getConnectionHint, validateModelId, validateVendor } =
+	vi.hoisted(() => ({
+		createClient: vi.fn(),
+		getCachedCatalog: vi.fn(),
+		getConnectionHint: vi.fn(() => ({
+			displayName: 'Connection hint',
+			name: 'connectionHint',
+			type: 'notice',
+			default: '',
+		})),
+		validateModelId: vi.fn((value: string) => value),
+		validateVendor: vi.fn((value: string) => {
+			const normalized = value.trim().toLowerCase();
+			if (normalized.includes('/') || normalized.includes(' '))
+				throw new Error('Invalid OCI vendor');
+			return normalized || undefined;
+		}),
+	}));
 
 vi.mock('@n8n/ai-utilities', () => ({
 	getConnectionHintNoticeField: getConnectionHint,
@@ -32,6 +39,7 @@ vi.mock('../../../../utils/ociGenAi', () => ({
 		return value;
 	},
 	validateOciModelId: validateModelId,
+	validateOciVendor: validateVendor,
 }));
 
 import { LmChatOciGenAi } from '../LmChatOciGenAi.node';
@@ -171,5 +179,43 @@ describe('LmChatOciGenAi', () => {
 		const result = await search.call(context as unknown as ILoadOptionsFunctions, 'llama');
 
 		expect(result.results).toEqual([{ name: 'Meta Llama', value: 'meta.llama-3.3-70b-instruct' }]);
+	});
+
+	it('normalizes the vendor filter before searching chat models', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'vendor') return ' OpenAI ';
+			return '';
+		});
+		getCachedCatalog.mockResolvedValue({ searchModels: [] });
+
+		const search = node.methods.listSearch?.searchChatModels;
+		if (!search) throw new Error('Chat model search is not configured');
+		await search.call(context as unknown as ILoadOptionsFunctions);
+
+		expect(validateVendor).toHaveBeenCalledWith(' OpenAI ');
+		expect(getCachedCatalog).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ vendor: 'openai' }),
+		);
+	});
+
+	it('rejects an invalid vendor filter before searching chat models', async () => {
+		const node = new LmChatOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'vendor') return 'vendor/name';
+			return '';
+		});
+
+		const search = node.methods.listSearch?.searchChatModels;
+		if (!search) throw new Error('Chat model search is not configured');
+		await expect(search.call(context as unknown as ILoadOptionsFunctions)).rejects.toThrow(
+			'Invalid OCI vendor',
+		);
+		expect(getCachedCatalog).not.toHaveBeenCalled();
 	});
 });

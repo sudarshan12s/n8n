@@ -22,6 +22,11 @@ vi.mock('@oracle/langchain-oci', () => ({
 
 vi.mock('../../../../utils/ociGenAi', () => ({
 	createOciGenAiClient: createClient,
+	getOciEmbeddingModelCapabilities: (modelId: string) =>
+		modelId.toLowerCase() === 'cohere.embed-v4.0'
+			? { outputDimensions: [256, 512, 1024, 1536] }
+			: undefined,
+	getOciEmbeddingModelIdsWithOutputDimensions: () => ['cohere.embed-v4.0'],
 	getOnDemandEmbeddingModels: () => [],
 	isOciGenAiCredentials: () => true,
 	validateOciCompartmentId: (value: string) => {
@@ -100,11 +105,12 @@ describe('EmbeddingsOciGenAi', () => {
 		) as INodeProperties | undefined;
 
 		expect(outputDimensions).toMatchObject({
-			default: 1536,
+			default: '',
 			description:
-				'Number of dimensions in the returned embedding vector. Cohere Embed 4 supports 256, 512, 1024, and 1536. Changing this value can require a vector store with matching dimensions.',
+				'Number of dimensions in the returned embedding vector. Default uses the model setting. Changing this value can require a vector store with matching dimensions.',
 		});
 		expect(outputDimensions?.options).toEqual([
+			{ name: 'Default', value: '' },
 			{ name: '256', value: 256 },
 			{ name: '512', value: 512 },
 			{ name: '1024', value: 1024 },
@@ -175,7 +181,7 @@ describe('EmbeddingsOciGenAi', () => {
 		});
 
 		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
-			'Output Dimensions is supported only by Cohere Embed 4',
+			'Output Dimensions is not supported by the selected OCI embedding model.',
 		);
 		expect(createClient).not.toHaveBeenCalled();
 	});
@@ -192,7 +198,7 @@ describe('EmbeddingsOciGenAi', () => {
 		});
 
 		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
-			'Output Dimensions for Cohere Embed 4 must be 256, 512, 1024, or 1536.',
+			'Output Dimensions is not supported by the selected OCI embedding model.',
 		);
 		expect(createClient).not.toHaveBeenCalled();
 	});

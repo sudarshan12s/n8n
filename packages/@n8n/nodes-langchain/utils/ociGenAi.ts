@@ -6,6 +6,7 @@ import * as genaiInference from 'oci-generativeaiinference';
 const OCI_MODEL_OCID_PATTERN =
 	/^ocid[0-9]+\.generativeaimodel\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
 const OCI_PROVIDER_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._+-]*$/i;
+const OCI_VENDOR_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const OCI_COMPARTMENT_OCID_PATTERN =
 	/^ocid[0-9]+\.(?:compartment|tenancy)\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
 // Searchable selectors invoke list search per keystroke; retain a small, short-lived catalog.
@@ -14,6 +15,20 @@ const MAX_MODEL_CATALOG_CACHE_ENTRIES = 100;
 const MAX_MODEL_CATALOG_PAGES_PER_ENTRY = 20;
 export const OCI_INFERENCE_CLIENT_CACHE_TTL_MS = 60_000;
 const MAX_INFERENCE_CLIENT_CACHE_ENTRIES = 32;
+
+export type OciEmbeddingModelCapabilities = {
+	outputDimensions?: readonly number[];
+};
+
+/**
+ * Known embedding model capabilities until OCI exposes reliable capability metadata.
+ * Keep this fallback aligned with OCI model documentation.
+ */
+const OCI_EMBEDDING_MODEL_CAPABILITIES: Readonly<Record<string, OciEmbeddingModelCapabilities>> = {
+	'cohere.embed-v4.0': {
+		outputDimensions: [256, 512, 1024, 1536],
+	},
+};
 
 export interface OciGenAiCredentials {
 	authentication: 'apiKey' | 'instancePrincipal' | 'resourcePrincipal' | 'session';
@@ -43,6 +58,34 @@ export function validateOciModelId(modelId: string): string {
 		throw new UserError(`Invalid OCI Generative AI model ID: "${normalized}"`);
 	}
 	return normalized;
+}
+
+/** Normalizes the optional OCI management API vendor filter before model discovery. */
+export function validateOciVendor(vendor: string | undefined): string | undefined {
+	const normalized = vendor?.trim().toLowerCase();
+	if (!normalized) return undefined;
+
+	if (!OCI_VENDOR_PATTERN.test(normalized)) {
+		throw new UserError(
+			'OCI vendor must contain only letters, numbers, hyphens, and underscores (maximum 64 characters)',
+		);
+	}
+
+	return normalized;
+}
+
+/** Returns capabilities for the selected embedding model when n8n has a verified fallback. */
+export function getOciEmbeddingModelCapabilities(
+	modelId: string,
+): OciEmbeddingModelCapabilities | undefined {
+	return OCI_EMBEDDING_MODEL_CAPABILITIES[modelId.toLowerCase()];
+}
+
+/** Returns model IDs that expose verified output-dimension controls. */
+export function getOciEmbeddingModelIdsWithOutputDimensions(): readonly string[] {
+	return Object.entries(OCI_EMBEDDING_MODEL_CAPABILITIES)
+		.filter(([, capabilities]) => capabilities.outputDimensions !== undefined)
+		.map(([modelId]) => modelId);
 }
 
 export function validateOciCompartmentId(compartmentId: string): string {
@@ -481,7 +524,7 @@ export async function getCachedOciGenAiModelCatalogPage(
 		paginationToken?: string;
 	},
 ): Promise<OciGenAiModelCatalogPage> {
-	const normalizedVendor = vendor?.trim().toLowerCase() ?? '';
+	const normalizedVendor = validateOciVendor(vendor) ?? '';
 	const cacheKey = JSON.stringify([
 		getOciAuthenticationIdentity(credentials),
 		credentials.regionId.trim().toLowerCase(),
