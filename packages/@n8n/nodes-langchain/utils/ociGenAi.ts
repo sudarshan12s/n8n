@@ -4,11 +4,12 @@ import * as genai from 'oci-generativeai';
 import * as genaiInference from 'oci-generativeaiinference';
 
 const OCI_MODEL_OCID_PATTERN =
-	/^ocid[0-9]+\.generativeaimodel\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
+	/^ocid[0-9]+\.generativeaimodel\.oc[0-9]+(?:\.[a-z0-9_-]*)*\.[a-z0-9_-]+$/i;
 const OCI_PROVIDER_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._+-]*$/i;
 const OCI_VENDOR_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const OCI_COMPARTMENT_OCID_PATTERN =
-	/^ocid[0-9]+\.(?:compartment|tenancy)\.oc[0-9]+[a-z0-9._-]*\.[a-z0-9._-]+$/i;
+	/^ocid[0-9]+\.(?:compartment|tenancy)\.oc[0-9]+(?:\.[a-z0-9_-]*)*\.[a-z0-9_-]+$/i;
+const MAX_OCI_OCID_LENGTH = 256;
 // Searchable selectors invoke list search per keystroke; retain a small, short-lived catalog.
 const MODEL_CATALOG_CACHE_TTL_MS = 60_000;
 const MAX_MODEL_CATALOG_CACHE_ENTRIES = 100;
@@ -92,6 +93,12 @@ export function validateOciCompartmentId(compartmentId: string): string {
 	const normalized = compartmentId.trim();
 	if (!normalized) {
 		throw new UserError('Compartment OCID is required');
+	}
+	if (normalized.length > MAX_OCI_OCID_LENGTH) {
+		throw new UserError('Compartment OCID is too long (maximum 256 characters)');
+	}
+	if ([...normalized].some((character) => character.charCodeAt(0) < 0x20 || character === '\x7f')) {
+		throw new UserError('Compartment OCID contains invalid control characters');
 	}
 	if (!OCI_COMPARTMENT_OCID_PATTERN.test(normalized)) {
 		throw new UserError('Invalid OCI Compartment OCID');

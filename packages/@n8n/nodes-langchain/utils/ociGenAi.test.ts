@@ -295,6 +295,14 @@ describe('OCI input validation', () => {
 			expect(() => validateOciModelId(input)).toThrow();
 			expect(performance.now() - startedAt).toBeLessThan(100);
 		});
+
+		it('rejects oversized model OCIDs before pattern matching', () => {
+			const oversizedValue = 'ocid1.generativeaimodel.oc1..' + 'a'.repeat(257);
+			const startedAt = performance.now();
+
+			expect(() => validateOciModelId(oversizedValue)).toThrow('OCI model ID is too long');
+			expect(performance.now() - startedAt).toBeLessThan(100);
+		});
 	});
 
 	describe('validateOciCompartmentId', () => {
@@ -313,6 +321,19 @@ describe('OCI input validation', () => {
 		it('rejects invalid resource types and empty values', () => {
 			expect(() => validateOciCompartmentId('ocid1.instance.oc1..aaaa123')).toThrow();
 			expect(() => validateOciCompartmentId('   ')).toThrow();
+		});
+
+		it('rejects oversized and control-character values before pattern matching', () => {
+			const oversizedValue = 'ocid1.tenancy.oc1..' + 'a'.repeat(257);
+			const startedAt = performance.now();
+
+			expect(() => validateOciCompartmentId(oversizedValue)).toThrow(
+				'Compartment OCID is too long',
+			);
+			expect(() => validateOciCompartmentId('ocid1.compartment.oc1..aaaa\x00')).toThrow(
+				'Compartment OCID contains invalid control characters',
+			);
+			expect(performance.now() - startedAt).toBeLessThan(100);
 		});
 	});
 
