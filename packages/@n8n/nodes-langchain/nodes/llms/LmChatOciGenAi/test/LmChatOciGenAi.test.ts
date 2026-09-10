@@ -3,10 +3,20 @@ import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
 import type { ILoadOptionsFunctions, INode, ISupplyDataFunctions } from 'n8n-workflow';
 import type { Mocked } from 'vitest';
 
-const { createClient, getCachedCatalog, validateModelId } = vi.hoisted(() => ({
+const { createClient, getCachedCatalog, getConnectionHint, validateModelId } = vi.hoisted(() => ({
 	createClient: vi.fn(),
 	getCachedCatalog: vi.fn(),
+	getConnectionHint: vi.fn(() => ({
+		displayName: 'Connection hint',
+		name: 'connectionHint',
+		type: 'notice',
+		default: '',
+	})),
 	validateModelId: vi.fn((value: string) => value),
+}));
+
+vi.mock('@n8n/ai-utilities', () => ({
+	getConnectionHintNoticeField: getConnectionHint,
 }));
 
 vi.mock('@oracle/langchain-oci', () => ({
@@ -70,6 +80,7 @@ describe('LmChatOciGenAi', () => {
 
 		expect(node.description.credentials).toEqual([{ name: 'ociGenAiApi', required: true }]);
 		expect(node.methods).not.toHaveProperty('credentialTest');
+		expect(getConnectionHint).toHaveBeenCalledWith(['ai_chain', 'ai_agent']);
 	});
 
 	it('describes the seed option as model-dependent reproducibility', () => {
@@ -127,6 +138,10 @@ describe('LmChatOciGenAi', () => {
 
 		const modelProperty = node.description.properties.find((property) => property.name === 'model');
 		expect(modelProperty?.displayOptions).toEqual({ show: { servingMode: ['onDemand'] } });
+		const vendorProperty = node.description.properties.find(
+			(property) => property.name === 'vendor',
+		);
+		expect(vendorProperty?.displayOptions).toEqual({ show: { servingMode: ['onDemand'] } });
 	});
 
 	it('rejects an invalid compartment before creating an inference client', async () => {

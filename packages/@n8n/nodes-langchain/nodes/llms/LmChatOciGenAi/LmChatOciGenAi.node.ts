@@ -1,4 +1,5 @@
 import { OciGenAiGenericChat } from '@oracle/langchain-oci';
+import { getConnectionHintNoticeField } from '@n8n/ai-utilities';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
@@ -191,6 +192,11 @@ const vendorProperty: INodeProperties = {
 	name: 'vendor',
 	type: 'string',
 	default: '',
+	displayOptions: {
+		show: {
+			servingMode: ['onDemand'],
+		},
+	},
 	placeholder: 'Meta, Cohere, Google, etc.',
 	description: 'Optional vendor filter used when searching the model list',
 };
@@ -328,6 +334,7 @@ export class LmChatOciGenAi implements INodeType {
 		outputs: [NodeConnectionTypes.AiLanguageModel],
 		outputNames: ['Model'],
 		properties: [
+			getConnectionHintNoticeField([NodeConnectionTypes.AiChain, NodeConnectionTypes.AiAgent]),
 			modelProperty,
 			compartmentProperty,
 			vendorProperty,
@@ -409,24 +416,24 @@ export class LmChatOciGenAi implements INodeType {
 			| 'onDemand'
 			| 'dedicated';
 
-		const dedicatedEndpointId = (
-			this.getNodeParameter('dedicatedEndpointId', itemIndex, '') as string
-		).trim();
-
-		if (servingMode === 'dedicated' && !dedicatedEndpointId) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
-				{ itemIndex },
-			);
-		}
-
 		let model: string | undefined;
+		let dedicatedEndpointId: string | undefined;
 		if (servingMode === 'onDemand') {
 			try {
 				model = getModelId(this.getNodeParameter('model', itemIndex));
 			} catch (error) {
 				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+			}
+		} else {
+			dedicatedEndpointId = (
+				this.getNodeParameter('dedicatedEndpointId', itemIndex, '') as string
+			).trim();
+			if (!dedicatedEndpointId) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'Dedicated Endpoint ID is required when using Dedicated Endpoint serving mode.',
+					{ itemIndex },
+				);
 			}
 		}
 
