@@ -100,24 +100,33 @@ describe('EmbeddingsOciGenAi', () => {
 	it('explains output dimension compatibility with the selected model and vector store', () => {
 		const node = new EmbeddingsOciGenAi();
 		const options = node.description.properties.find((property) => property.name === 'options');
-		const outputDimensions = options?.options?.find(
+		const outputDimensions = options?.options?.filter(
 			(property) => property.name === 'outputDimensions',
-		) as INodeProperties | undefined;
+		) as INodeProperties[] | undefined;
+		const knownModelDimensions = outputDimensions?.find((property) => property.type === 'options');
+		const customDimensions = outputDimensions?.find((property) => property.type === 'string');
 
-		expect(outputDimensions).toMatchObject({
+		expect(knownModelDimensions).toMatchObject({
 			default: '',
 			description:
 				'Number of dimensions in the returned embedding vector. Default uses the model setting. Changing this value can require a vector store with matching dimensions.',
 		});
-		expect(outputDimensions?.options).toEqual([
+		expect(knownModelDimensions?.options).toEqual([
 			{ name: 'Default', value: '' },
 			{ name: '256', value: 256 },
 			{ name: '512', value: 512 },
 			{ name: '1024', value: 1024 },
 			{ name: '1536', value: 1536 },
 		]);
-		expect(outputDimensions?.displayOptions).toEqual({
+		expect(knownModelDimensions?.displayOptions).toEqual({
 			show: { '/model.value': ['cohere.embed-v4.0'] },
+		});
+		expect(customDimensions).toMatchObject({
+			default: '',
+			placeholder: '1536',
+			description:
+				'Optional number of dimensions in the returned embedding vector. Leave empty to use the model default. OCI validates values for models without known dimension metadata.',
+			displayOptions: { hide: { '/model.value': ['cohere.embed-v4.0'] } },
 		});
 	});
 
@@ -169,19 +178,40 @@ describe('EmbeddingsOciGenAi', () => {
 		expect(createClient).not.toHaveBeenCalled();
 	});
 
-	it('rejects output dimensions for an on-demand model that does not support them', async () => {
+	it('passes output dimensions for a model without verified capability metadata to OCI', async () => {
 		const node = new EmbeddingsOciGenAi();
 		const context = createContext();
 		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
 			if (name === 'model') return 'cohere.embed-english-v3.0';
 			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
 			if (name === 'servingMode') return 'onDemand';
-			if (name === 'options') return { outputDimensions: 1024 };
+			if (name === 'options') return { outputDimensions: '1024' };
+			return '';
+		});
+
+		await node.supplyData.call(context, 0);
+
+		expect(MockedOciGenAiEmbeddings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				onDemandModelId: 'cohere.embed-english-v3.0',
+				outputDimensions: 1024,
+			}),
+		);
+	});
+
+	it('rejects non-positive or non-integer custom output dimensions', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		context.getNodeParameter = vi.fn().mockImplementation((name: string) => {
+			if (name === 'model') return 'new.embedding-model';
+			if (name === 'compartmentId') return 'ocid1.compartment.oc1..test';
+			if (name === 'servingMode') return 'onDemand';
+			if (name === 'options') return { outputDimensions: '1.5' };
 			return '';
 		});
 
 		await expect(node.supplyData.call(context, 0)).rejects.toThrow(
-			'Output Dimensions is not supported by the selected OCI embedding model.',
+			'Output Dimensions must be a positive integer.',
 		);
 		expect(createClient).not.toHaveBeenCalled();
 	});

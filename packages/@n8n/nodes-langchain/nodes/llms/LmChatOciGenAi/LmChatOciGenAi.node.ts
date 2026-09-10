@@ -93,6 +93,28 @@ function sanitizeOciToolDefinitions(
 	}));
 }
 
+export function normalizeEmptyOciToolCallContent(
+	messages: Parameters<OciGenAiGenericChat['_prepareRequest']>[0],
+) {
+	return messages.map((message) => {
+		// n8n tool agents can represent an otherwise valid AI tool call with content: [].
+		// OCI accepts the tool call but rejects the empty array, so retain its metadata and use an empty string.
+		if (
+			Array.isArray(message.content) &&
+			message.content.length === 0 &&
+			isRecord(message) &&
+			Array.isArray(message.tool_calls) &&
+			message.tool_calls.length > 0
+		) {
+			const normalizedMessage = Object.create(Object.getPrototypeOf(message));
+			Object.assign(normalizedMessage, message, { content: '' });
+			return normalizedMessage;
+		}
+
+		return message;
+	});
+}
+
 /**
  * Keep this as a chat-model subclass rather than returning model.bind(...).
  *
@@ -115,6 +137,14 @@ class N8nOciGenAiGenericChat extends OciGenAiGenericChat {
 	) {
 		super(params);
 		this.defaultRequestParams = params.defaultRequestParams ?? {};
+	}
+
+	override _prepareRequest(
+		messages: Parameters<OciGenAiGenericChat['_prepareRequest']>[0],
+		options: Parameters<OciGenAiGenericChat['_prepareRequest']>[1],
+		stream?: boolean,
+	) {
+		return super._prepareRequest(normalizeEmptyOciToolCallContent(messages), options, stream);
 	}
 
 	override _createRequest(

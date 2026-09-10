@@ -1,6 +1,8 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import type { GenerativeAiInferenceClient } from 'oci-generativeaiinference';
+
+import { normalizeEmptyOciToolCallContent } from '../LmChatOciGenAi.node';
 
 function createChatModel(): OciGenAiGenericChat {
 	return new OciGenAiGenericChat({
@@ -20,6 +22,26 @@ describe('OCI chat message content', () => {
 				{},
 			),
 		).not.toThrow();
+	});
+
+	it('accepts empty content on AI tool-call messages', () => {
+		const chatModel = createChatModel();
+
+		const messages = normalizeEmptyOciToolCallContent([
+			new AIMessage({
+				content: [],
+				tool_calls: [
+					{
+						id: 'call_1',
+						name: 'exampleTool',
+						args: {},
+						type: 'tool_call',
+					},
+				],
+			}),
+		]);
+
+		expect(() => chatModel._prepareRequest(messages, {})).not.toThrow();
 	});
 
 	it('rejects unsupported multimodal content instead of serializing it as text', () => {

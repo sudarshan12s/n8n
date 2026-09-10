@@ -114,6 +114,21 @@ const outputDimensionsProperties: INodeProperties[] =
 		];
 	});
 
+const customOutputDimensionsProperty: INodeProperties = {
+	displayName: 'Output Dimensions',
+	name: 'outputDimensions',
+	type: 'string',
+	default: '',
+	placeholder: '1536',
+	displayOptions: {
+		hide: {
+			'/model.value': [...getOciEmbeddingModelIdsWithOutputDimensions()],
+		},
+	},
+	description:
+		'Optional number of dimensions in the returned embedding vector. Leave empty to use the model default. OCI validates values for models without known dimension metadata.',
+};
+
 const modelProperty: INodeProperties = {
 	displayName: 'Model',
 	name: 'model',
@@ -222,6 +237,7 @@ const optionsProperty: INodeProperties = {
 				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
 		},
 		...outputDimensionsProperties,
+		customOutputDimensionsProperty,
 		{
 			displayName: 'Truncate',
 			name: 'truncate',
@@ -383,12 +399,30 @@ export class EmbeddingsOciGenAi implements INodeType {
 			);
 		}
 
+		const outputDimensionsValue = options.outputDimensions;
 		const outputDimensions =
-			typeof options.outputDimensions === 'number' && options.outputDimensions > 0
-				? options.outputDimensions
-				: undefined;
+			outputDimensionsValue === undefined || outputDimensionsValue === ''
+				? undefined
+				: Number(outputDimensionsValue);
 
-		if (outputDimensions !== undefined && !supportsOutputDimensions(model, outputDimensions)) {
+		if (
+			outputDimensions !== undefined &&
+			(!Number.isInteger(outputDimensions) || outputDimensions < 1)
+		) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Output Dimensions must be a positive integer.',
+				{ itemIndex },
+			);
+		}
+
+		// Only validate dimensions for models with verified capability metadata. OCI validates new or
+		// manually entered models whose capabilities are not yet available to n8n.
+		if (
+			outputDimensions !== undefined &&
+			getOciEmbeddingModelCapabilities(model ?? '')?.outputDimensions !== undefined &&
+			!supportsOutputDimensions(model, outputDimensions)
+		) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'Output Dimensions is not supported by the selected OCI embedding model.',
