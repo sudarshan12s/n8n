@@ -191,13 +191,14 @@ export type OciGenAiOnDemandEmbeddingModel = {
 };
 
 /**
- * Verified on-demand embedding models for the n8n selector.
+ * Curated, region-aware fallback for the embedding-model selector.
  *
- * This is intentionally curated rather than derived from listModels(), because the OCI management
- * catalog does not provide enough information to reliably distinguish on-demand availability by region.
- * Keep this list aligned with OCI Models by Region. Manual model ID entry remains available for new models.
+ * listModels() discovers TEXT_EMBEDDINGS capability, but its response alone does not establish
+ * current on-demand serving availability in a region. Keep this fallback aligned with OCI Models by
+ * Region. A future hybrid selector can use discovered models once it has a reliable serving-mode signal.
+ * Manual model ID entry remains available for new models.
  */
-const OCI_VERIFIED_ON_DEMAND_EMBEDDING_MODELS: OciGenAiOnDemandEmbeddingModel[] = [
+const OCI_ON_DEMAND_EMBEDDING_MODEL_FALLBACKS: OciGenAiOnDemandEmbeddingModel[] = [
 	{
 		displayName: 'Cohere Embed 4',
 		modelId: 'cohere.embed-v4.0',
@@ -279,14 +280,14 @@ function normalizeOciModelCatalog(models: OciGenAiCatalogModel[]): OciGenAiSearc
 		.sort((first, second) => first.name.localeCompare(second.name));
 }
 
-export function getOnDemandEmbeddingModels(
+export function getOnDemandEmbeddingModelFallbacks(
 	regionId: string,
 	filter?: string,
 ): OciGenAiOnDemandEmbeddingModel[] {
 	const normalizedRegionId = regionId.trim().toLowerCase();
 	const normalizedFilter = filter?.trim().toLowerCase() ?? '';
 
-	return OCI_VERIFIED_ON_DEMAND_EMBEDDING_MODELS.filter(
+	return OCI_ON_DEMAND_EMBEDDING_MODEL_FALLBACKS.filter(
 		(model) =>
 			model.regions.includes(normalizedRegionId) &&
 			(!normalizedFilter ||

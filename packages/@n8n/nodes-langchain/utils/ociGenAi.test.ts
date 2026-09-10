@@ -45,7 +45,7 @@ import {
 	getOciEmbeddingModelCapabilities,
 	getOciEmbeddingModelIdsWithOutputDimensions,
 	getOnDemandModelId,
-	getOnDemandEmbeddingModels,
+	getOnDemandEmbeddingModelFallbacks,
 	isOnDemandModelAvailable,
 	OCI_INFERENCE_CLIENT_CACHE_TTL_MS,
 	type OciGenAiCredentials,
@@ -69,9 +69,9 @@ describe('OCI input validation', () => {
 		clearOciGenAiCachesForTesting();
 	});
 
-	describe('getOnDemandEmbeddingModels', () => {
+	describe('getOnDemandEmbeddingModelFallbacks', () => {
 		it('returns verified on-demand Cohere Embed 4 regions', () => {
-			expect(getOnDemandEmbeddingModels('us-ashburn-1')).toEqual(
+			expect(getOnDemandEmbeddingModelFallbacks('us-ashburn-1')).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
 						displayName: 'Cohere Embed 4',
@@ -79,13 +79,13 @@ describe('OCI input validation', () => {
 					}),
 				]),
 			);
-			expect(getOnDemandEmbeddingModels('eu-frankfurt-1')).not.toEqual(
+			expect(getOnDemandEmbeddingModelFallbacks('eu-frankfurt-1')).not.toEqual(
 				expect.arrayContaining([expect.objectContaining({ modelId: 'cohere.embed-v4.0' })]),
 			);
 		});
 
 		it('marks verified on-demand Embed 3 models as deprecated', () => {
-			expect(getOnDemandEmbeddingModels('us-chicago-1')).toEqual(
+			expect(getOnDemandEmbeddingModelFallbacks('us-chicago-1')).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
 						displayName: 'Cohere Embed English 3 (Deprecated)',
@@ -96,7 +96,7 @@ describe('OCI input validation', () => {
 		});
 
 		it('does not list Cohere Embed 4 in dedicated-only regions', () => {
-			expect(getOnDemandEmbeddingModels('ap-hyderabad-1')).not.toEqual(
+			expect(getOnDemandEmbeddingModelFallbacks('ap-hyderabad-1')).not.toEqual(
 				expect.arrayContaining([expect.objectContaining({ modelId: 'cohere.embed-v4.0' })]),
 			);
 		});

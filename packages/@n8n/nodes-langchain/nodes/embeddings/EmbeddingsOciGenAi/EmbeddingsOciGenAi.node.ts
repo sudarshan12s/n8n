@@ -19,7 +19,7 @@ import {
 	createOciGenAiClient,
 	getOciEmbeddingModelCapabilities,
 	getOciEmbeddingModelIdsWithOutputDimensions,
-	getOnDemandEmbeddingModels,
+	getOnDemandEmbeddingModelFallbacks,
 	isOciGenAiCredentials,
 	validateOciCompartmentId,
 	validateOciModelId,
@@ -317,7 +317,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 					throw new NodeOperationError(this.getNode(), 'Invalid OCI Generative AI credentials');
 				}
 
-				const results = getOnDemandEmbeddingModels(credentials.regionId, filter).map(
+				const results = getOnDemandEmbeddingModelFallbacks(credentials.regionId, filter).map(
 					(model): INodeListSearchItems => ({
 						name: model.displayName,
 						value: model.modelId,

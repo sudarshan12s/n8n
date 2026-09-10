@@ -27,7 +27,7 @@ vi.mock('../../../../utils/ociGenAi', () => ({
 			? { outputDimensions: [256, 512, 1024, 1536] }
 			: undefined,
 	getOciEmbeddingModelIdsWithOutputDimensions: () => ['cohere.embed-v4.0'],
-	getOnDemandEmbeddingModels: () => [],
+	getOnDemandEmbeddingModelFallbacks: () => [],
 	isOciGenAiCredentials: () => true,
 	validateOciCompartmentId: (value: string) => {
 		if (!value.startsWith('ocid1.compartment.')) throw new Error('Invalid OCI Compartment OCID');

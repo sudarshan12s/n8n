@@ -1,5 +1,5 @@
-import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import { getConnectionHintNoticeField } from '@n8n/ai-utilities';
+import { OciGenAiGenericChat } from '@oracle/langchain-oci';
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
