@@ -99,8 +99,8 @@ Run from `packages/@n8n/nodes-langchain`:
 pnpm test credentials/test/OracleCloudGenAiApi.credentials.test.ts utils/ociGenAi.test.ts nodes/llms/LmChatOciGenAi/test/LmChatOciGenAi.test.ts nodes/llms/LmChatOciGenAi/test/OciMessageContent.test.ts nodes/embeddings/EmbeddingsOciGenAi/test/EmbeddingsOciGenAi.test.ts
 pnpm typecheck
 pnpm lint
-pnpm test:oci # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
-pnpm test:oci:sockets # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
+pnpm exec tsx nodes/llms/LmChatOciGenAi/test/oci.int.ts # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
+pnpm exec tsx nodes/llms/LmChatOciGenAi/test/oci-sockets.int.ts # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT_OCID are set
 ```
 
 ### Manual
@@ -111,5 +111,5 @@ pnpm test:oci:sockets # Runs only when OCI_GENAI_MODEL and OCI_GENAI_COMPARTMENT
 4. On the Embeddings node, select **Cohere Embed 4** and confirm **Output Dimensions** offers Default plus 256, 512, 1,024, and 1,536. Select a different or manually entered embedding model and confirm the field accepts a custom positive integer. Connect it to a vector store or embedding consumer and confirm it creates vectors with the dimension expected by the vector index.
 5. For dedicated serving, select **Dedicated** and enter an endpoint OCID. Confirm leaving the endpoint ID empty produces the expected validation error.
 6. Optionally set the advanced endpoint to the exact inference host for the selected region and realm. Confirm a mismatched realm, non-HTTPS URL, path, port, query, fragment, or credentials is rejected.
-7. To verify OCI chat integration locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm test:oci`.
-8. To inspect OCI client and socket behavior locally, run `pnpm test:oci:sockets`. Review the sequential, same-wrapper, new-wrapper, idle, and three concurrent-batch socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. The output compares reused, new, and retired local endpoints. Set `OCI_SOCKET_IDLE_SECONDS` or `OCI_SOCKET_EXTENDED_IDLE_SECONDS` to adjust the observation intervals.
+7. To verify OCI chat integration locally, configure the default `~/.oci/config` profile, then set `OCI_GENAI_COMPARTMENT_OCID` and `OCI_GENAI_MODEL`. From `packages/@n8n/nodes-langchain`, run `pnpm exec tsx nodes/llms/LmChatOciGenAi/test/oci.int.ts`.
+8. To inspect OCI client and socket behavior locally, run `pnpm exec tsx nodes/llms/LmChatOciGenAi/test/oci-sockets.int.ts`. Review the sequential, same-wrapper, new-wrapper, idle, and three concurrent-batch socket snapshots. Do not treat a concurrent socket count above one as a leak by itself. The output compares reused, new, and retired local endpoints. Set `OCI_SOCKET_IDLE_SECONDS` or `OCI_SOCKET_EXTENDED_IDLE_SECONDS` to adjust the observation intervals.
