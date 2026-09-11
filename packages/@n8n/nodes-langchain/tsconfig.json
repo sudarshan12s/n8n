@@ -22,13 +22,25 @@
 				"./node_modules/@langchain/core/dist/load/map_keys.d.cts"
 			],
 
+			// @oracle/langchain-oci exposes LangChain Embeddings and ChatModel types across
+			// the package boundary. Pin those shared @langchain/core subpaths to `.d.cts`
+			// so they use the same type identities as n8n; otherwise TypeScript can resolve
+			// `.d.ts` and `.d.cts` variants and report unrelated types such as AsyncCaller.
+			//
 			// @oracle/langchain-oracledb is ESM-only (type: module), so its types
 			// reach @langchain/core through the import condition (.d.ts). This
 			// package resolves core via require (.d.cts); pin the subpath it shares
 			// with Oracle to .d.cts so both agree on a single VectorStore identity.
 			// Must stay `.d.cts` (not extensionless): the base resolves to the ESM
 			// `.d.ts` and reintroduces the "two unrelated VectorStore types" error.
-			"@langchain/core/vectorstores": ["./node_modules/@langchain/core/dist/vectorstores.d.cts"]
+			"@langchain/core/vectorstores": ["./node_modules/@langchain/core/dist/vectorstores.d.cts"],
+			"@langchain/core/embeddings": ["./node_modules/@langchain/core/dist/embeddings.d.cts"],
+			"@langchain/core/language_models/chat_models": [
+				"./node_modules/@langchain/core/dist/language_models/chat_models.d.cts"
+			],
+			"@langchain/core/language_models/base": [
+				"./node_modules/@langchain/core/dist/language_models/base.d.cts"
+			]
 		},
 		"emitDecoratorMetadata": true,
 		"experimentalDecorators": true,
