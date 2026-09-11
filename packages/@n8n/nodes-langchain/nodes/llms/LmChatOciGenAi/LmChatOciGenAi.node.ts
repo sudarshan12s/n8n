@@ -228,8 +228,8 @@ const vendorProperty: INodeProperties = {
 			servingMode: ['onDemand'],
 		},
 	},
-	placeholder: 'Meta, Cohere, Google, etc.',
-	description: 'Optional vendor filter used when searching the model list',
+	placeholder: 'Cohere, Meta, Google, OpenAI, or xAI',
+	description: 'Optional vendor filter used to narrow the OCI model catalog',
 };
 
 const servingModeProperty: INodeProperties = {
