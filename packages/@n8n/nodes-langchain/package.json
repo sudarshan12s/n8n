@@ -288,7 +288,7 @@
     "@n8n/typeorm": "0.3.20-16",
     "@n8n/typescript-config": "workspace:*",
     "@n8n/utils": "workspace:*",
-    "@oracle/langchain-oci": "file:/Users/sudarshansoma/Downloads/oracle-langchain-oci-0.0.2.tgz",
+    "@oracle/langchain-oci": "file:/Users/sudarshansoma/Downloads/oracle-langchain-oci-0.0.2-cjs-types.tgz",
     "@oracle/langchain-oracledb": "0.2.0",
     "@pinecone-database/pinecone": "catalog:",
     "@qdrant/js-client-rest": "catalog:",
