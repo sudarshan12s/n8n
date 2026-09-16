@@ -28,7 +28,14 @@
 			// with Oracle to .d.cts so both agree on a single VectorStore identity.
 			// Must stay `.d.cts` (not extensionless): the base resolves to the ESM
 			// `.d.ts` and reintroduces the "two unrelated VectorStore types" error.
-			"@langchain/core/vectorstores": ["./node_modules/@langchain/core/dist/vectorstores.d.cts"]
+			"@langchain/core/vectorstores": ["./node_modules/@langchain/core/dist/vectorstores.d.cts"],
+			"@langchain/core/embeddings": ["./node_modules/@langchain/core/dist/embeddings.d.cts"],
+			"@langchain/core/language_models/chat_models": [
+				"./node_modules/@langchain/core/dist/language_models/chat_models.d.cts"
+			],
+			"@langchain/core/language_models/base": [
+				"./node_modules/@langchain/core/dist/language_models/base.d.cts"
+			]
 		},
 		"emitDecoratorMetadata": true,
 		"experimentalDecorators": true,
