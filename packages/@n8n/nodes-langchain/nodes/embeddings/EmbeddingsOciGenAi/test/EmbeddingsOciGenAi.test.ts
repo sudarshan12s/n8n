@@ -1,7 +1,12 @@
 import { logWrapper } from '@n8n/ai-utilities';
 import { OciGenAiEmbeddings } from '@oracle/langchain-oci';
 import { createMockExecuteFunction } from 'n8n-nodes-base/test/nodes/Helpers';
-import type { INode, INodeProperties, ISupplyDataFunctions } from 'n8n-workflow';
+import type {
+	ILoadOptionsFunctions,
+	INode,
+	INodeProperties,
+	ISupplyDataFunctions,
+} from 'n8n-workflow';
 import type { Mocked } from 'vitest';
 
 const { createClient } = vi.hoisted(() => ({ createClient: vi.fn() }));
@@ -136,8 +141,26 @@ describe('EmbeddingsOciGenAi', () => {
 		const maxConcurrency = options?.options?.find((property) => property.name === 'maxConcurrency');
 
 		expect(maxConcurrency).toMatchObject({
+			typeOptions: {
+				minValue: 1,
+				maxValue: 10,
+			},
 			description:
 				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
+		});
+	});
+
+	it('returns no model entries when the regional catalog has no matching models', async () => {
+		const node = new EmbeddingsOciGenAi();
+		const context = createContext();
+		const search = node.methods.listSearch?.searchEmbeddingModels;
+
+		if (!search) throw new Error('Embedding model search is not configured');
+
+		await expect(
+			search.call(context as unknown as ILoadOptionsFunctions, 'nomatch'),
+		).resolves.toEqual({
+			results: [],
 		});
 	});
 
@@ -215,7 +238,8 @@ describe('EmbeddingsOciGenAi', () => {
 
 	it.each([
 		[{ batchSize: 97 }, 'Batch Size must be an integer between 1 and 96.'],
-		[{ maxConcurrency: 0 }, 'Maximum Concurrency must be a positive integer.'],
+		[{ maxConcurrency: 0 }, 'Maximum Concurrency must be an integer between 1 and 10.'],
+		[{ maxConcurrency: 11 }, 'Maximum Concurrency must be an integer between 1 and 10.'],
 	])('rejects invalid embedding request option %o', async (options, errorMessage) => {
 		const node = new EmbeddingsOciGenAi();
 		const context = createContext();

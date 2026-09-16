@@ -239,27 +239,8 @@ export function isOnDemandModelAvailable(model: OciGenAiCatalogModel): boolean {
 }
 
 export function getOnDemandModelId(model: OciGenAiCatalogModel): string {
-	if (!model.id.startsWith('ocid1.generativeaimodel.')) {
-		return model.id;
-	}
-
-	const vendor = model.vendor?.trim();
-	const displayName = model.displayName?.trim();
-	if (!vendor || !displayName) {
-		return '';
-	}
-
-	// Management APIs can return a model OCID while inference requires its provider model ID.
-	const modelName = (
-		displayName.toLowerCase().startsWith(vendor.toLowerCase())
-			? displayName.slice(vendor.length).trim()
-			: displayName
-	).replace(/^[^a-z0-9]+/i, '');
-
-	return `${vendor}.${modelName}`
-		.toLowerCase()
-		.replace(/\s+/g, '-')
-		.replace(/[^a-z0-9.+-]/g, '');
+	// A management model OCID is not a provider inference ID. Do not derive one from display metadata.
+	return /^ocid[0-9]+\.generativeaimodel\./i.test(model.id) ? '' : model.id;
 }
 
 function normalizeOciModelCatalog(models: OciGenAiCatalogModel[]): OciGenAiSearchModel[] {

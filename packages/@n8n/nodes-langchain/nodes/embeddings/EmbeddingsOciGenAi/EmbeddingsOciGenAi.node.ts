@@ -27,11 +27,19 @@ import {
 
 const DEFAULT_BATCH_SIZE = 96;
 const DEFAULT_MAX_CONCURRENCY = 2;
+const MAX_CONCURRENCY = 10;
 const DEFAULT_OUTPUT_DIMENSIONS = '';
 
 type ResourceLocatorValue = {
 	mode: string;
 	value: string;
+};
+
+type OciEmbeddingsOptions = {
+	batchSize?: number;
+	maxConcurrency?: number;
+	outputDimensions?: number | string;
+	truncate?: 'NONE' | 'START' | 'END';
 };
 
 function isResourceLocatorValue(value: unknown): value is ResourceLocatorValue {
@@ -233,6 +241,7 @@ const optionsProperty: INodeProperties = {
 			default: DEFAULT_MAX_CONCURRENCY,
 			typeOptions: {
 				minValue: 1,
+				maxValue: MAX_CONCURRENCY,
 			},
 			description:
 				'Maximum number of OCI embedding requests to run concurrently. Higher values can improve bulk ingestion throughput but can increase throttling.',
@@ -325,17 +334,7 @@ export class EmbeddingsOciGenAi implements INodeType {
 					}),
 				);
 
-				return {
-					results:
-						results.length > 0
-							? results
-							: [
-									{
-										name: 'No On-Demand Embedding Models Available in This Region',
-										value: '',
-									},
-								],
-				};
+				return { results };
 			},
 		},
 	};
@@ -379,10 +378,10 @@ export class EmbeddingsOciGenAi implements INodeType {
 				? getModelId(this.getNode(), this.getNodeParameter('model', itemIndex), itemIndex)
 				: undefined;
 
-		const options = this.getNodeParameter('options', itemIndex, {});
+		const options = this.getNodeParameter('options', itemIndex, {}) as OciEmbeddingsOptions;
 
-		const batchSize = (options.batchSize as number) ?? DEFAULT_BATCH_SIZE;
-		const maxConcurrency = (options.maxConcurrency as number) ?? DEFAULT_MAX_CONCURRENCY;
+		const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+		const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 
 		if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 96) {
 			throw new NodeOperationError(
@@ -392,10 +391,14 @@ export class EmbeddingsOciGenAi implements INodeType {
 			);
 		}
 
-		if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+		if (
+			!Number.isInteger(maxConcurrency) ||
+			maxConcurrency < 1 ||
+			maxConcurrency > MAX_CONCURRENCY
+		) {
 			throw new NodeOperationError(
 				this.getNode(),
-				'Maximum Concurrency must be a positive integer.',
+				`Maximum Concurrency must be an integer between 1 and ${MAX_CONCURRENCY}.`,
 				{ itemIndex },
 			);
 		}

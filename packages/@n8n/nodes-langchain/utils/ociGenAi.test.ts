@@ -124,15 +124,17 @@ describe('OCI input validation', () => {
 			).toBe(true);
 		});
 
-		it('derives a provider model ID from a management model OCID', () => {
+		it('does not synthesize a provider model ID from a management model OCID', () => {
 			expect(
 				getOnDemandModelId({
 					id: 'ocid1.generativeaimodel.oc1.phx.example',
 					vendor: 'Meta',
 					displayName: 'Meta Llama 3.3 70B Instruct',
 				}),
-			).toBe('meta.llama-3.3-70b-instruct');
-			expect(getOnDemandModelId({ id: 'ocid1.generativeaimodel.oc1.phx.example' })).toBe('');
+			).toBe('');
+			expect(getOnDemandModelId({ id: 'meta.llama-3.3-70b-instruct' })).toBe(
+				'meta.llama-3.3-70b-instruct',
+			);
 		});
 	});
 
@@ -424,6 +426,11 @@ describe('OCI input validation', () => {
 						{
 							id: 'meta.llama-3.3-70b-instruct',
 							displayName: 'Meta Llama 3.3 70B Instruct',
+						},
+						{
+							id: 'ocid1.generativeaimodel.oc1.phx.example',
+							vendor: 'Cohere',
+							displayName: 'Cohere Embed 4',
 						},
 					],
 				},

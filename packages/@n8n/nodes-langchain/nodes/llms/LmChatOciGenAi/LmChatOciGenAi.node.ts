@@ -330,6 +330,14 @@ const optionsProperty: INodeProperties = {
 	],
 };
 
+type OciChatOptions = {
+	temperature?: number;
+	maxTokens?: number;
+	topP?: number;
+	topK?: number;
+	seed?: number;
+};
+
 export class LmChatOciGenAi implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'OCI Generative AI Chat Model',
@@ -473,7 +481,7 @@ export class LmChatOciGenAi implements INodeType {
 			}
 		}
 
-		const options = this.getNodeParameter('options', itemIndex, {});
+		const options = this.getNodeParameter('options', itemIndex, {}) as OciChatOptions;
 
 		const temperature =
 			typeof options.temperature === 'number' ? options.temperature : DEFAULT_TEMPERATURE;
