@@ -22,8 +22,8 @@ export type OciEmbeddingModelCapabilities = {
 };
 
 /**
- * Known embedding model capabilities until OCI exposes reliable capability metadata.
- * Keep this fallback aligned with OCI model documentation.
+ * Known embedding model capabilities until OCI exposes reliable per-model
+ * output-dimension metadata. Keep this fallback aligned with OCI model documentation.
  */
 const OCI_EMBEDDING_MODEL_CAPABILITIES: Readonly<Record<string, OciEmbeddingModelCapabilities>> = {
 	'cohere.embed-v4.0': {
@@ -358,10 +358,9 @@ async function createOciGenAiClientInternal(
 
 // Cache only non-secret identity and routing settings; model and compartment are request-specific.
 function getInferenceClientCacheKey(credentials: OciGenAiCredentials): string {
-	// Private key and passphrase stay out of cache keys. Fingerprint changes identify key rotation;
-	// The fingerprint identifies the OCI signing key. A changed fingerprint
-	// invalidates the cached client. Changes to the private-key passphrase
-	// without changing the fingerprint take effect when the cache entry expires.
+	// Private key and passphrase stay out of cache keys. The fingerprint identifies
+	// the OCI signing key, so key rotation invalidates the cached client. Passphrase-only
+	// changes take effect after the cache entry expires.
 	const authenticationIdentity = getOciAuthenticationIdentity(credentials);
 	const endpoint = validateOciEndpoint(credentials.serviceEndpoint, credentials.regionId) ?? '';
 
