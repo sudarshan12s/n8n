@@ -11,7 +11,10 @@ import {
 	escapeSqlStringLiteral,
 	getBindParameters,
 	getCompatibleValue,
+	getBindDefsForExecuteMany,
+	getInBindParametersForExecute,
 	getOutBindDefsForExecute,
+	mapDbType,
 	quoteSqlIdentifier,
 } from '../helpers/utils';
 import { getOracleDBConfig } from '../transport';
@@ -552,7 +555,78 @@ describe('Test getBindParameters ', () => {
 	});
 });
 
+describe('Test NCLOB handling', () => {
+	it('should bind CLOB input without a string size limit', () => {
+		const content = 'T'.repeat(4001);
+		const options: Record<string, unknown> = {};
+
+		getBindDefsForExecuteMany(
+			mock<INode>(),
+			'INSERT INTO "NN2"',
+			{ C: { type: 'CLOB', nullable: true, maxSize: 4000 } },
+			['C'],
+			[],
+			{ C: content },
+			options,
+		);
+
+		expect(options.bindDefs).toEqual([{ type: oracleDBTypes.CLOB }]);
+		expect(mapDbType('CLOB')).toEqual({
+			oracledbType: oracleDBTypes.CLOB,
+			n8nType: 'string',
+		});
+	});
+
+	it('should bind NCLOB input with the national character set', () => {
+		const bindParameters: oracleDBTypes.BindParameter[] = [];
+
+		getInBindParametersForExecute(
+			['CONTENT'],
+			{ CONTENT: { type: 'NCLOB', nullable: true, maxSize: 0 } },
+			{ CONTENT: '😀😀😀😀😀' },
+			'insert',
+			bindParameters,
+		);
+
+		expect(bindParameters).toEqual([{ type: oracleDBTypes.NCLOB, val: '😀😀😀😀😀' }]);
+		expect(mapDbType('NCLOB')).toEqual({
+			oracledbType: oracleDBTypes.NCLOB,
+			n8nType: 'string',
+		});
+	});
+});
+
 describe('Test configureQueryRunner', () => {
+	it('should fetch NCLOB columns as strings', async () => {
+		const execute = vi.fn().mockResolvedValue({ rows: [{ ID: 2, CONTENT: '😀😀😀😀😀' }] });
+		const close = vi.fn().mockResolvedValue(undefined);
+		const connection = { execute, close };
+		const getConnection = vi.fn().mockResolvedValue(connection);
+		const pool = { getConnection } as unknown as oracleDBTypes.Pool;
+		const context = {
+			helpers: { constructExecutionMetaData: vi.fn((data: INodeExecutionData[]) => data) },
+		} as unknown as IExecuteFunctions;
+		const node = { typeVersion: 1.1 } as unknown as INode;
+		const queryRunner = configureQueryRunner.call(context, node, false, pool);
+
+		await queryRunner([{ query: 'SELECT ID, CONTENT FROM NCLOB_TEST', values: {} }], [], {
+			operation: 'select',
+			stmtBatching: 'independently',
+		});
+
+		const executeOptions = execute.mock.calls[0]?.[2] as oracleDBTypes.ExecuteOptions;
+		const fetchTypeHandler = executeOptions.fetchTypeHandler;
+
+		expect(
+			fetchTypeHandler?.({
+				name: 'CONTENT',
+				dbType: oracleDBTypes.NCLOB,
+			} as oracleDBTypes.Metadata<unknown>),
+		).toEqual({
+			type: oracleDBTypes.STRING,
+		});
+	});
+
 	it('should return object out bind values from execute operations', async () => {
 		const execute = vi.fn().mockResolvedValue({ outBinds: { ret: 'registered' } });
 		const close = vi.fn().mockResolvedValue(undefined);
