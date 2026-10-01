@@ -80,15 +80,19 @@ export function mapDbType(dbType: string): DbTypeMapping {
 		case type === 'date':
 			return { oracledbType: oracledb.DATE, n8nType: 'dateTime' };
 
+		case type === 'clob':
+			return { oracledbType: oracledb.CLOB, n8nType: 'string' };
+
+		case type === 'nclob':
+			return { oracledbType: oracledb.NCLOB, n8nType: 'string' };
+
 		// Numbers
 		case type === 'number':
 		case /^(binary_double|binary_float|decimal|float|int|integer|smallint)$/.test(type):
 			return { oracledbType: oracledb.DB_TYPE_NUMBER, n8nType: 'number' };
 
 		// Strings
-		case /^(char|clob|long|nchar|nclob|nvarchar2|rowid|urowid|varchar|varchar2|xmltype)$/.test(
-			type,
-		):
+		case /^(char|long|nchar|nvarchar2|rowid|urowid|varchar|varchar2|xmltype)$/.test(type):
 			return { oracledbType: oracledb.STRING, n8nType: 'string' };
 
 		// Boolean
@@ -580,7 +584,7 @@ export function configureQueryRunner(
 						},
 					};
 				}
-				if (metaData.dbType === oracledb.CLOB) {
+				if (metaData.dbType === oracledb.CLOB || metaData.dbType === oracledb.NCLOB) {
 					return { type: oracledb.STRING };
 				}
 				if (metaData.dbType === oracledb.DB_TYPE_BLOB) {
