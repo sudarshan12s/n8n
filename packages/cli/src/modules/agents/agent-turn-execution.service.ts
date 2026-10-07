@@ -59,6 +59,8 @@ interface ExecuteTurnConfig {
 	previewChat?: boolean;
 	productionN8nChat?: boolean;
 	automaticPreviewContinuation?: boolean;
+	/** The abort signal is a wake lease, not a chat request. */
+	isWakeRun?: boolean;
 	onExecutionStarted?: (executionId: string, sessionId: string, inputMessageIds: string[]) => void;
 	onExecutionRecorded?: (executionId: string) => void;
 	onSettled?: (suspended: boolean) => Promise<void>;
@@ -342,6 +344,29 @@ export class AgentTurnExecutionService {
 		onExecutionRecorded?.(recordedId);
 	}
 
+	/** Finalize an admitted execution whose runtime could not start. */
+	async recordFailedAdmission(
+		admission: AgentExecutionAdmission,
+		params: StartExecutionParams,
+		executionError: unknown,
+	): Promise<void> {
+		const recorder = this.createRecorder(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			admission.startedAt,
+		);
+		recorder.record({ type: 'error', error: executionError });
+		recorder.record({ type: 'finish', finishReason: 'error' });
+		await this.finalizeExecution({
+			executionId: admission.executionId,
+			executionStarted: false,
+			executionError,
+			params: { ...params, record: recorder.getMessageRecord() },
+		});
+	}
+
 	async recordFailedStart(
 		params: StartExecutionParams,
 		executionError: unknown,
@@ -463,7 +488,9 @@ export class AgentTurnExecutionService {
 				},
 				previewControl.controller,
 			);
-			previewControl.detachRequest();
+			// A closed chat request must not stop an admitted turn. A lost wake lease must,
+			// because the wake leaves its job results unconsumed and another wake retries them.
+			if (!config.isWakeRun) previewControl.detachRequest();
 		}
 		config.onExecutionStarted?.(executionId, config.context.threadId, inputMessageIds);
 		turn.options.abortSignal?.throwIfAborted();
