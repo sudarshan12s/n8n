@@ -24,6 +24,7 @@ const context = {
 	threadId: 'thread-1',
 	executionId: 'execution-1',
 	userId: 'user-1',
+	surface: 'preview' as const,
 };
 const thread = mock<AgentExecutionThread>({
 	id: context.threadId,
@@ -47,7 +48,7 @@ const checkpoint = mock<SerializableAgentState>({
 	pendingToolCalls: {
 		question: {
 			toolCallId: 'question',
-			toolName: 'ask_questions',
+			toolName: 'agent_builder_ask_questions',
 			input: {},
 			suspended: true,
 			suspendPayload: {},
@@ -161,9 +162,10 @@ it('relays Stop to the owning main and leaves other and later executions running
 		'thread-1',
 		'draft-chat:user-1',
 	);
+	const { surface: _surface, ...wireContext } = context;
 	expect(mainB.publisher.publishCommand).toHaveBeenCalledExactlyOnceWith({
 		command: 'cancel-agent-chat-execution',
-		payload: context,
+		payload: { ...wireContext, surface: 'preview', productionN8nChat: false },
 	});
 	await mainA.service.handleCancel(context);
 	expect(mainA.backgroundJobs.cancelForParent).toHaveBeenCalledWith(
@@ -179,6 +181,66 @@ it('relays Stop to the owning main and leaves other and later executions running
 	mainA.service.register({ ...context, executionId: 'execution-3' }, next);
 	await mainA.service.handleCancel(context);
 	expect(next.signal.aborted).toBe(false);
+});
+
+it('keeps pubsub wire compatibility with a main still on the old productionN8nChat payload', async () => {
+	const mainA = makeService();
+	const mainB = makeService();
+	const controller = new AbortController();
+	const production = { ...context, surface: 'n8n-chat' as const };
+	mainA.service.register(production, controller);
+	const producedExecution = { ...running, source: 'n8n_chat_production' };
+	mainA.repository.findOneBy.mockResolvedValue(producedExecution);
+	mainB.repository.findOneBy.mockResolvedValue(producedExecution);
+
+	expect(await mainB.service.requestCancel(production)).toBe(true);
+	const { surface: _surface, ...wireContext } = production;
+	expect(mainB.publisher.publishCommand).toHaveBeenCalledExactlyOnceWith({
+		command: 'cancel-agent-chat-execution',
+		payload: { ...wireContext, surface: 'n8n-chat', productionN8nChat: true },
+	});
+
+	// An old main on the previous version relays this shape, with no `surface` field.
+	await mainA.service.handleCancel({ ...wireContext, productionN8nChat: true });
+	expect(controller.signal.aborted).toBe(true);
+	expect(mainA.backgroundJobs.cancelForParent).toHaveBeenCalledWith(
+		'agent-1',
+		'thread-1',
+		'n8n-chat-production:user-1',
+	);
+});
+
+it('relays Stop of a system-agent turn with its own surface and memory scope', async () => {
+	const mainA = makeService();
+	const mainB = makeService();
+	const controller = new AbortController();
+	const system = { ...context, surface: 'system' as const };
+	mainA.service.register(system, controller);
+	const systemExecution = { ...running, source: 'system_chat' };
+	mainA.repository.findOneBy.mockResolvedValue(systemExecution);
+	mainB.repository.findOneBy.mockResolvedValue(systemExecution);
+
+	expect(await mainB.service.requestCancel(system)).toBe(true);
+	const { surface: _surface, ...wireContext } = system;
+	expect(mainB.publisher.publishCommand).toHaveBeenCalledExactlyOnceWith({
+		command: 'cancel-agent-chat-execution',
+		payload: { ...wireContext, surface: 'system', productionN8nChat: false },
+	});
+
+	await mainA.service.handleCancel({ ...wireContext, surface: 'system', productionN8nChat: false });
+	expect(controller.signal.aborted).toBe(true);
+	expect(mainA.backgroundJobs.cancelForParent).toHaveBeenCalledWith(
+		'agent-1',
+		'thread-1',
+		'system-chat:user-1',
+	);
+});
+
+it('does not let the Preview surface stop a system-agent turn', async () => {
+	const { service, repository } = makeService(false);
+	repository.findOneBy.mockResolvedValue({ ...running, source: 'system_chat' });
+
+	await expect(service.requestCancel(context)).rejects.toThrow('Execution not found');
 });
 
 it.each(['local', 'remote', 'during validation'] as const)(
@@ -323,7 +385,7 @@ it('requires the production source before cancelling a suspended run', async () 
 
 it('rejects preview and foreign executions on the production cancel route', async () => {
 	const { service, repository } = makeService();
-	const production = { ...context, productionN8nChat: true };
+	const production = { ...context, surface: 'n8n-chat' as const };
 	await expect(service.requestCancel(production)).rejects.toBeInstanceOf(NotFoundError);
 	repository.findOneBy.mockResolvedValue({ ...running, source: 'n8n_chat_production' });
 	await expect(

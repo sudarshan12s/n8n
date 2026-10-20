@@ -11,15 +11,18 @@ import AgentItemContextMenu from './AgentItemContextMenu.vue';
 
 const props = withDefaults(
 	defineProps<{
+		/** In ref order. A skill has no on/off toggle: a ref is attached or it is not. */
 		skills: Array<{ id: string; skill: AgentSkill }>;
 		disabled?: boolean;
 		showLabel?: boolean;
 		validationIssues?: AgentConfigValidationIssue[];
+		outdatedSkillIds?: string[];
 	}>(),
 	{
 		disabled: false,
 		showLabel: true,
 		validationIssues: () => [],
+		outdatedSkillIds: () => [],
 	},
 );
 
@@ -34,6 +37,8 @@ const { groupIssueMessages } = useAgentCapabilityIssueMessages(() => props.valid
 const skillIssueMessages = computed(() =>
 	groupIssueMessages('skill', (issue) => issue.capability.id),
 );
+const outdatedSkillIds = computed(() => new Set(props.outdatedSkillIds));
+const outdatedWarning = computed(() => [i18n.baseText('agents.builder.skills.outdated.warning')]);
 </script>
 
 <template>
@@ -52,6 +57,8 @@ const skillIssueMessages = computed(() =>
 					icon="book-open"
 					:invalid="(skillIssueMessages.get(id) ?? []).length > 0"
 					:invalid-reasons="skillIssueMessages.get(id) ?? []"
+					:warning="outdatedSkillIds.has(id)"
+					:warning-reasons="outdatedSkillIds.has(id) ? outdatedWarning : []"
 					:disabled="props.disabled"
 					:class="$style.skillChip"
 					data-testid="agent-capabilities-skill-row"

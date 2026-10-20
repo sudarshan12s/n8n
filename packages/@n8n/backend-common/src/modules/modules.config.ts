@@ -3,6 +3,7 @@ import { CommaSeparatedStringArray, Config, Env } from '@n8n/config';
 import { UnknownModuleError } from './errors/unknown-module.error';
 
 export const MODULE_NAMES = [
+	'inbox',
 	'agents',
 	'agent-evals',
 	'insights',
@@ -41,6 +42,7 @@ export const MODULE_NAMES = [
 	'type-availability-policies',
 	'instance-reporting',
 	'inbound-auth-core',
+	'scim',
 ] as const;
 
 export type ModuleName = (typeof MODULE_NAMES)[number];
